@@ -1,0 +1,12 @@
+python-dotenv
+openai
+firecrawl-py
+beautifulsoup4
+langchain
+langchain-community
+langchain-openai
+chromadb
+requests
+flask
+flask-cors
+sseclient-py 
