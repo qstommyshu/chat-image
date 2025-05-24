@@ -500,10 +500,12 @@ if len(all_docs) > 0:
             # 3. 如果其他条件相同，保留相似度分数更高的
             return img1['score'] < img2['score']  # 分数越低越好
         
-        # 执行去重
+        # 执行去重 - 两层去重：1) 基于文件名 2) 基于Alt文本
         unique_results = []
         seen_base_names = {}
+        seen_alt_texts = {}
         
+        # 第一层去重：基于文件名（原有逻辑）
         for img in processed_results:
             base_name = get_image_base_name(img['url'])
             
@@ -522,22 +524,115 @@ if len(all_docs) > 0:
                 seen_base_names[base_name] = img
                 unique_results.append(img)
         
-        print(f"去重前: {len(processed_results)} 个结果，去重后: {len(unique_results)} 个结果")
+        print(f"文件名去重: {len(processed_results)} -> {len(unique_results)} 个结果")
+        
+        # 第二层去重：基于Alt文本
+        def normalize_alt_text(alt_text):
+            """标准化Alt文本，用于比较"""
+            if not alt_text:
+                return ""
+            # 转小写，去除多余空格，移除标点符号
+            import re
+            normalized = alt_text.lower().strip()
+            # 移除常见的标点符号和特殊字符
+            normalized = re.sub(r'[^\w\s]', ' ', normalized)
+            # 合并多个空格为单个空格
+            normalized = re.sub(r'\s+', ' ', normalized).strip()
+            return normalized
+        
+        def should_prefer_by_alt(img1, img2):
+            """基于Alt文本相同时，决定保留哪张图片"""
+            # 1. 优先保留JPG格式
+            if img1['format'] != img2['format']:
+                format_priority = {'jpg': 3, 'png': 2, 'webp': 1, 'svg': 0}
+                priority1 = format_priority.get(img1['format'], 0)
+                priority2 = format_priority.get(img2['format'], 0)
+                if priority1 != priority2:
+                    return priority1 > priority2
+            
+            # 2. 优先保留更大尺寸的图片
+            def get_image_size_score(url):
+                url_lower = url.lower()
+                if 'large' in url_lower:
+                    return 3
+                elif 'medium' in url_lower:
+                    return 2
+                elif 'small' in url_lower:
+                    return 1
+                else:
+                    return 2  # 默认中等优先级
+            
+            size1 = get_image_size_score(img1['url'])
+            size2 = get_image_size_score(img2['url'])
+            if size1 != size2:
+                return size1 > size2
+            
+            # 3. 优先保留相似度分数更高的
+            return img1['score'] < img2['score']  # 分数越低越相似
+        
+        # 执行基于Alt文本的去重
+        alt_filtered_results = []
+        
+        for img in unique_results:
+            alt_text = normalize_alt_text(img['alt_text'])
+            
+            # 如果Alt文本为空，直接添加（不参与Alt文本去重）
+            if not alt_text:
+                alt_filtered_results.append(img)
+                continue
+            
+            if alt_text in seen_alt_texts:
+                # 找到相同Alt文本的图片
+                existing_img = seen_alt_texts[alt_text]
+                if should_prefer_by_alt(img, existing_img):
+                    # 替换为当前图片
+                    seen_alt_texts[alt_text] = img
+                    # 从结果中移除旧的，添加新的
+                    alt_filtered_results = [r for r in alt_filtered_results 
+                                          if normalize_alt_text(r['alt_text']) != alt_text]
+                    alt_filtered_results.append(img)
+                # 否则保留现有的，忽略当前的
+            else:
+                # 第一次见到这个Alt文本
+                seen_alt_texts[alt_text] = img
+                alt_filtered_results.append(img)
+        
+        # 最终结果
+        final_results = alt_filtered_results
+        
+        print(f"Alt文本去重: {len(unique_results)} -> {len(final_results)} 个结果")
+        print(f"总去重效果: {len(processed_results)} -> {len(final_results)} 个结果")
+        
+        # 显示去重统计
+        if len(seen_alt_texts) > 0:
+            print(f"发现 {len(seen_alt_texts)} 个不同的Alt文本")
+            # 显示一些被去重的Alt文本样本
+            duplicate_alt_count = len(unique_results) - len(final_results)
+            if duplicate_alt_count > 0:
+                print(f"基于Alt文本去重了 {duplicate_alt_count} 个重复图片")
+                
+                # 显示去重的Alt文本样本
+                sample_alts = list(seen_alt_texts.keys())[:3]
+                if sample_alts:
+                    print("去重的Alt文本样本:")
+                    for alt in sample_alts:
+                        if alt:  # 只显示非空的Alt文本
+                            print(f"  - '{alt}'")
         
         # 排序结果：如果没有指定格式过滤，优先JPG和PNG
         if not format_filter:
             # 优先JPG，然后PNG，然后其他格式，最后按分数排序
-            unique_results.sort(key=lambda x: (
+            final_results.sort(key=lambda x: (
                 x['format'] not in ['jpg', 'png'],  # 优先JPG/PNG
                 x['format'] != 'jpg',               # JPG优先于PNG
                 x['score']                          # 按分数排序
             ))
         else:
             # 如果指定了格式，只按分数排序
-            unique_results.sort(key=lambda x: x['score'])
+            final_results.sort(key=lambda x: x['score'])
         
         # 返回前5个结果
-        top_5 = unique_results[:5]
+        top_5 = final_results[:5]
         
         if not top_5:
             if format_filter:
