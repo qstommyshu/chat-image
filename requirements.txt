@@ -9,4 +9,5 @@ chromadb
 requests
 flask
 flask-cors
-sseclient-py 
+sseclient-py
+gunicorn
