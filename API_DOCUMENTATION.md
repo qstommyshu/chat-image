@@ -1,4 +1,4 @@
-# Intelligent Image Search API Documentation
+# Image Chat API Documentation
 
 ## Overview
 

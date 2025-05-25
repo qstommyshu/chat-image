@@ -1,4 +1,4 @@
-# Intelligent Website Crawler and AI-Powered Image Search System
+# Image Chat - An Intelligent Website Crawler and AI-Powered Image Search System
 
 A production-ready, modular system that intelligently crawls websites, extracts images, and provides powerful natural language search capabilities. Built with performance, scalability, and real-world applications in mind.
 
