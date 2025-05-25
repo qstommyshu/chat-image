@@ -1363,7 +1363,5 @@ def cleanup_old_sessions():
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5001))
-    # 生产环境务必关闭 debug，否则可能泄露内网信息
     debug = os.environ.get("FLASK_DEBUG", "0").lower() in ("1", "true", "yes")
-    # 监听 0.0.0.0，才能让外部（Replit 容器）访问到
     app.run(host="0.0.0.0", port=port, debug=debug, threaded=True)
