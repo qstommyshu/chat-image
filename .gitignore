@@ -1,0 +1,5 @@
+__pycache__*
+crawled_pages*
+.cursor/
+.env
+.DS_Store
