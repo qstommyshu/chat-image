@@ -1,36 +1,62 @@
-# Flask Image Search API Documentation
+# Intelligent Image Search API Documentation
 
 ## Overview
 
-The Flask Image Search API provides endpoints for crawling websites and searching for images using natural language queries. It supports real-time status updates via Server-Sent Events (SSE) and maintains session-based vector databases for efficient image searching.
+The Intelligent Image Search API provides a comprehensive set of endpoints for crawling websites and searching for images using AI-powered natural language queries. Built with a modular, production-ready architecture, it offers real-time status updates, semantic search capabilities, and intelligent resource management.
 
-The API has been refactored into a modular architecture with clearly separated responsibilities:
+### Key Features
 
-- Route handlers for API endpoints
-- Service layer for business logic
-- Data models for structured data
-- Utility functions for common operations
+- **Memory-Efficient Processing**: Direct HTML processing without disk I/O
+- **AI-Powered Search**: Natural language understanding with OpenAI embeddings
+- **Real-Time Updates**: Server-Sent Events with polling fallback
+- **Session Isolation**: Each crawl gets its own vector database namespace
+- **Smart Deduplication**: Advanced duplicate detection using semantic analysis
+- **Production-Ready**: Comprehensive error handling and resource management
 
 ## Base URL
 
 ```
-http://127.0.0.1:5000
+http://localhost:5001
 ```
 
-## Endpoints
+## Architecture Overview
+
+The API follows a modular blueprint-based architecture:
+
+```
+app/
+├── api/                  # Flask blueprints for API endpoints
+│   ├── crawl.py         # Crawling operations & session management
+│   ├── status.py        # Real-time status monitoring (SSE & polling)
+│   ├── chat.py          # Natural language image search
+│   └── health.py        # Health checks & monitoring
+├── services/            # Business logic layer
+│   ├── crawler.py       # Website crawling orchestration
+│   ├── processor.py     # HTML parsing & image extraction
+│   └── search.py        # AI-powered search & deduplication
+├── models/              # Data models
+│   └── session.py       # Session management & concurrency controls
+└── config.py            # Configuration & lazy-loaded clients
+```
+
+## Authentication
+
+Currently, no authentication is required. The API uses internal API keys for external services (OpenAI, Firecrawl, Pinecone) configured via environment variables.
+
+## Core Endpoints
 
 ### 1. Start Website Crawl
 
 **POST** `/crawl`
 
-Initiates a crawling job for the specified website.
+Initiates an intelligent crawling operation that processes content directly in memory and indexes images for semantic search.
 
 #### Request Body
 
 ```json
 {
   "url": "https://www.apple.com/iphone",
-  "limit": 10
+  "limit": 15
 }
 ```
 
@@ -45,25 +71,38 @@ Initiates a crawling job for the specified website.
 {
   "session_id": "550e8400-e29b-41d4-a716-446655440000",
   "message": "Crawling started",
-  "subscribe_url": "/crawl/550e8400-e29b-41d4-a716-446655440000/status"
+  "subscribe_url": "/crawl/550e8400-e29b-41d4-a716-446655440000/status",
+  "status_url_sse": "/crawl/550e8400-e29b-41d4-a716-446655440000/status",
+  "status_url_polling": "/crawl/550e8400-e29b-41d4-a716-446655440000/status-simple"
 }
 ```
 
 #### Error Responses
 
-- `400 Bad Request`: Missing or invalid URL
+- `400 Bad Request`: Missing or invalid URL format
 - `409 Conflict`: Domain already being crawled
 - `429 Too Many Requests`: Maximum concurrent crawls reached
 
-### 2. Crawl Status (SSE)
+#### Example
+
+```bash
+curl -X POST http://localhost:5001/crawl \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://www.apple.com/iphone",
+    "limit": 15
+  }'
+```
+
+### 2. Real-Time Crawl Status (SSE)
 
 **GET** `/crawl/<session_id>/status`
 
-Subscribe to real-time crawling status updates using Server-Sent Events.
+Subscribe to real-time crawling status updates using Server-Sent Events. Provides live progress monitoring with automatic timeout and graceful connection handling.
 
 #### Event Types
 
-1. **connected**
+1. **connected** - Initial connection confirmation
 
    ```json
    {
@@ -72,49 +111,53 @@ Subscribe to real-time crawling status updates using Server-Sent Events.
    }
    ```
 
-2. **status**
+2. **status** - Phase transitions (crawling → processing → indexing)
 
    ```json
    {
      "type": "status",
      "data": {
-       "status": "crawling",
-       "message": "Starting to crawl https://www.apple.com/iphone"
+       "status": "processing",
+       "message": "Extracting images directly from crawled content"
      }
    }
    ```
 
-3. **progress**
+3. **progress** - Detailed progress with statistics
 
    ```json
    {
      "type": "progress",
      "data": {
-       "message": "Processed 156 images from 10 pages",
+       "message": "Processed 156 images from 10 pages (no disk storage needed)",
        "stats": {
-         "formats": {"jpg": 89, "png": 45, "svg": 22},
-         "pages": {"https://www.apple.com/iphone": 45, ...}
-       }
+         "formats": { "jpg": 89, "png": 45, "svg": 22 },
+         "pages": { "https://www.apple.com/iphone": 45 }
+       },
+       "progress_percent": 75.5
      }
    }
    ```
 
-4. **completed**
+4. **completed** - Success with comprehensive summary
 
    ```json
    {
      "type": "completed",
      "data": {
        "status": "completed",
-       "summary": "I've successfully crawled https://www.apple.com/iphone...",
+       "summary": "I've successfully crawled https://www.apple.com/iphone and found 156 images across 10 pages...",
        "total_images": 156,
        "total_pages": 10,
-       "stats": {...}
+       "stats": {
+         "formats": { "jpg": 89, "png": 45, "svg": 22 }
+       }
      }
    }
    ```
 
-5. **error**
+5. **error** - Error details with recovery information
+
    ```json
    {
      "type": "error",
@@ -125,26 +168,100 @@ Subscribe to real-time crawling status updates using Server-Sent Events.
    }
    ```
 
-#### Example JavaScript Client
+6. **heartbeat** - Keep-alive signals during long operations
+   ```json
+   {
+     "type": "heartbeat",
+     "time": 45
+   }
+   ```
+
+#### JavaScript Client Example
 
 ```javascript
-const eventSource = new EventSource("/crawl/SESSION_ID/status");
+const eventSource = new EventSource(`/crawl/${sessionId}/status`);
 
 eventSource.onmessage = function (event) {
   const data = JSON.parse(event.data);
   console.log("Status update:", data);
 
-  if (data.type === "completed" || data.type === "error") {
-    eventSource.close();
+  switch (data.type) {
+    case "progress":
+      updateProgressBar(data.data.progress_percent);
+      break;
+    case "completed":
+      showResults(data.data);
+      eventSource.close();
+      break;
+    case "error":
+      showError(data.data.message);
+      eventSource.close();
+      break;
   }
+};
+
+eventSource.onerror = function (event) {
+  console.log("SSE connection error, falling back to polling");
+  eventSource.close();
+  startPolling(sessionId);
 };
 ```
 
-### 3. Chat / Search Images
+### 3. Polling-Based Status (Alternative to SSE)
+
+**GET** `/crawl/<session_id>/status-simple`
+
+Simple JSON-based status endpoint for environments where SSE doesn't work reliably (e.g., Replit, Heroku).
+
+#### Response
+
+```json
+{
+  "session_id": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "processing",
+  "completed": false,
+  "error": null,
+  "total_images": 89,
+  "total_pages": 7,
+  "messages": [
+    {
+      "type": "progress",
+      "data": {
+        "message": "Indexing progress: 45.2% (67/156 documents)"
+      },
+      "timestamp": "2024-01-15T10:35:22.123Z"
+    }
+  ],
+  "image_stats": {
+    "formats": { "jpg": 45, "png": 30, "svg": 14 }
+  }
+}
+```
+
+#### Polling Example
+
+```javascript
+async function pollStatus(sessionId) {
+  while (true) {
+    const response = await fetch(`/crawl/${sessionId}/status-simple`);
+    const data = await response.json();
+
+    updateUI(data);
+
+    if (data.completed || data.error) {
+      break;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 2000)); // Poll every 2 seconds
+  }
+}
+```
+
+### 4. Natural Language Image Search
 
 **POST** `/chat`
 
-Search for images using natural language queries based on the crawled content.
+Search for images using AI-powered natural language understanding. The system parses intent, format preferences, and context to provide highly relevant results.
 
 #### Request Body
 
@@ -153,12 +270,8 @@ Search for images using natural language queries based on the crawled content.
   "session_id": "550e8400-e29b-41d4-a716-446655440000",
   "chat_history": [
     {
-      "role": "ai",
-      "content": "I've crawled https://apple.com/iphone and found 156 images..."
-    },
-    {
       "role": "human",
-      "content": "Show me iPhone camera images"
+      "content": "Show me high-quality iPhone camera images in JPG format"
     }
   ]
 }
@@ -166,25 +279,59 @@ Search for images using natural language queries based on the crawled content.
 
 | Field        | Type   | Required | Description                                  |
 | ------------ | ------ | -------- | -------------------------------------------- |
-| session_id   | string | Yes      | The crawl session ID                         |
+| session_id   | string | Yes      | The crawl session ID to search within        |
 | chat_history | array  | Yes      | Array of chat messages with role and content |
 
 #### Response
 
 ```json
 {
-  "response": "I'll help you find iPhone camera images\n\nI found 5 relevant images:",
+  "response": "I'll help you find high-quality iPhone camera images in JPG format\n\nI found 5 relevant images:",
   "search_results": [
     {
-      "url": "https://www.apple.com/images/iphone-camera.jpg",
+      "url": "https://www.apple.com/images/iphone-15-pro-camera-system.jpg",
       "format": "jpg",
-      "alt_text": "iPhone 15 Pro Camera System",
-      "source_url": "https://www.apple.com/iphone",
+      "alt_text": "iPhone 15 Pro Advanced Camera System with 48MP Main Camera",
+      "source_url": "https://www.apple.com/iphone/",
       "score": 0.8234
     }
   ],
   "session_id": "550e8400-e29b-41d4-a716-446655440000"
 }
+```
+
+#### Advanced Search Examples
+
+```bash
+# Format-specific search
+curl -X POST http://localhost:5001/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "session_id": "your-session-id",
+    "chat_history": [
+      {"role": "human", "content": "Find PNG images of Apple Watch"}
+    ]
+  }'
+
+# Contextual search
+curl -X POST http://localhost:5001/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "session_id": "your-session-id",
+    "chat_history": [
+      {"role": "human", "content": "Show me hero banner images from the homepage"}
+    ]
+  }'
+
+# Quality-focused search
+curl -X POST http://localhost:5001/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "session_id": "your-session-id",
+    "chat_history": [
+      {"role": "human", "content": "High-resolution product photos suitable for print"}
+    ]
+  }'
 ```
 
 #### Error Responses
@@ -193,13 +340,13 @@ Search for images using natural language queries based on the crawled content.
 - `404 Not Found`: Session not found or vector database missing
 - `400 Bad Request`: Crawling not yet completed
 
-### 4. List Sessions
+### 5. Session Management
+
+#### List All Sessions
 
 **GET** `/sessions`
 
-Get a list of all crawl sessions.
-
-#### Response
+Get a comprehensive list of all crawl sessions with status and statistics.
 
 ```json
 {
@@ -217,13 +364,11 @@ Get a list of all crawl sessions.
 }
 ```
 
-### 5. Delete Session
+#### Delete Specific Session
 
 **DELETE** `/sessions/<session_id>`
 
-Delete a specific session and free its resources.
-
-#### Response
+Delete a session and free all associated resources including vector database and domain tracking.
 
 ```json
 {
@@ -231,17 +376,13 @@ Delete a specific session and free its resources.
 }
 ```
 
-#### Error Responses
-
-- `404 Not Found`: Session not found
-
-### 6. Clean Up Old Sessions
+#### Cleanup Old Sessions
 
 **POST** `/cleanup`
 
-Clean up old completed sessions to free memory.
+Automatically clean up old completed sessions to free memory and resources.
 
-#### Request Body
+**Request Body:**
 
 ```json
 {
@@ -249,11 +390,7 @@ Clean up old completed sessions to free memory.
 }
 ```
 
-| Field     | Type    | Required | Description                          |
-| --------- | ------- | -------- | ------------------------------------ |
-| hours_old | integer | No       | Age threshold in hours (default: 24) |
-
-#### Response
+**Response:**
 
 ```json
 {
@@ -263,86 +400,267 @@ Clean up old completed sessions to free memory.
 }
 ```
 
-### 7. Health Check
+### 6. Health Check & Monitoring
 
 **GET** `/health`
 
-Check if the server is running.
-
-#### Response
+Check server health and get system status information.
 
 ```json
 {
   "status": "healthy",
-  "version": "1.0.0",
-  "active_sessions": 5,
-  "active_crawls": 2
+  "version": "2.0.0"
 }
 ```
 
-## Concurrency Controls
+## Intelligent Design Features
 
-The API implements several concurrency controls:
+### Memory-Efficient Processing
 
-1. **Domain Locking**: Only one crawl per domain is allowed at a time
-2. **Maximum Concurrent Crawls**: A limit on the number of simultaneous crawling operations
-3. **Session Isolation**: Each session has its own vector database and folder
-4. **Resource Cleanup**: Automatic cleanup of old sessions to free resources
+- **URL-Only Storage**: Vector database stores only URLs and metadata, not binary image data
+- **Direct Processing**: HTML content processed in memory without disk I/O
+- **Lazy Loading**: Images loaded on-demand from original sources
 
-## Example Usage Flow
+### AI-Powered Search Intelligence
 
-1. **Start a crawl job:**
-
-   ```bash
-   curl -X POST http://127.0.0.1:5000/crawl \
-     -H "Content-Type: application/json" \
-     -d '{"url": "https://www.apple.com/iphone", "limit": 10}'
-   ```
-
-2. **Subscribe to status updates:**
-   Use the `subscribe_url` from the response to connect via SSE and monitor progress.
-
-3. **Search for images:**
-   Once crawling is completed, use the chat endpoint with the session_id:
-
-   ```bash
-   curl -X POST http://127.0.0.1:5000/chat \
-     -H "Content-Type: application/json" \
-     -d '{
-       "session_id": "YOUR_SESSION_ID",
-       "chat_history": [
-         {"role": "human", "content": "Show me product images"}
-       ]
-     }'
-   ```
-
-4. **Clean up resources:**
-   When done, delete the session to free up resources:
-   ```bash
-   curl -X DELETE http://127.0.0.1:5000/sessions/YOUR_SESSION_ID
-   ```
-
-## Project Architecture
-
-The API is built using a modular architecture:
-
-```
-app/
-├── routes/               # API endpoints
-│   ├── admin_routes.py   # Session management
-│   ├── crawl_routes.py   # Website crawling
-│   └── search_routes.py  # Image search
-├── services/             # Business logic
-│   ├── crawler.py        # Crawling service
-│   └── search.py         # Search service
-└── models/               # Data models
-    └── session.py        # CrawlSession class
+```python
+# Example search queries the AI understands:
+"Show me iPad Pro images"                    # → Product-specific search
+"I need high-resolution iPhone photos"       # → Quality-focused search
+"Find PNG images of Apple Watch"             # → Format-filtered search
+"Camera feature screenshots in dark mode"    # → Contextual search
+"Product photos without people"              # → Advanced content filtering
 ```
 
-## Running the Server
+### Smart Deduplication
+
+- **Filename Analysis**: Identifies similar images with different resolutions
+- **Semantic Similarity**: Uses alt text and context for duplicate detection
+- **Format Prioritization**: Prefers JPG/PNG over other formats
+- **Context Awareness**: Considers surrounding HTML content
+
+### Production-Ready Architecture
+
+- **Session Isolation**: Each crawl gets its own vector database namespace
+- **Concurrency Controls**: Domain locking prevents duplicate crawls
+- **Resource Management**: Automatic cleanup of old sessions
+- **Error Recovery**: Graceful handling of failed pages or network issues
+
+## Rate Limits & Concurrency
+
+| Resource          | Limit            | Description                              |
+| ----------------- | ---------------- | ---------------------------------------- |
+| Concurrent Crawls | 3 (configurable) | Maximum simultaneous crawl operations    |
+| Domain Locking    | 1 per domain     | Prevents duplicate crawls of same domain |
+| Session Isolation | Unlimited        | Each session gets isolated vector space  |
+| SSE Timeout       | 300 seconds      | Auto-disconnect for idle SSE connections |
+
+## Error Handling
+
+### HTTP Status Codes
+
+| Code | Meaning             | Description                             |
+| ---- | ------------------- | --------------------------------------- |
+| 200  | Success             | Request completed successfully          |
+| 400  | Bad Request         | Invalid parameters or malformed request |
+| 404  | Not Found           | Session or resource not found           |
+| 409  | Conflict            | Domain already being crawled            |
+| 429  | Too Many Requests   | Concurrent crawl limit reached          |
+| 503  | Service Unavailable | SSE disabled, use polling endpoint      |
+
+### Error Response Format
+
+```json
+{
+  "error": "Domain example.com is already being crawled",
+  "existing_session": "another-session-id",
+  "message": "Please wait for the current crawl to complete or use the existing session"
+}
+```
+
+## Configuration Options
+
+Configure via environment variables:
+
+```env
+# Server Configuration
+PORT=5001                         # Server port
+ENABLE_SSE=true                   # Enable/disable Server-Sent Events
+SSE_TIMEOUT_SECONDS=300          # SSE connection timeout
+
+# Performance Tuning
+MAX_CONCURRENT_CRAWLS=3          # Maximum simultaneous crawls
+FIRECRAWL_WAIT_TIME=3000         # Wait time for JavaScript rendering
+
+# API Keys (Required)
+OPENAI_API_KEY=your_key_here
+FIRECRAWL_API_KEY=your_key_here
+PINECONE_API_KEY=your_key_here
+```
+
+## Complete Usage Example
+
+### 1. Start Crawling
 
 ```bash
-python server.py
+curl -X POST http://localhost:5001/crawl \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://www.apple.com/iphone", "limit": 15}'
 ```
 
-The server will start on `http://127.0.0.1:5000` using the configuration from `app/config.py`.
+### 2. Monitor Progress (Choose SSE or Polling)
+
+**Option A: Server-Sent Events**
+
+```javascript
+const eventSource = new EventSource(`/crawl/${sessionId}/status`);
+eventSource.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+  console.log("Progress:", data);
+};
+```
+
+**Option B: Polling (Replit/Heroku Compatible)**
+
+```javascript
+async function checkStatus() {
+  const response = await fetch(`/crawl/${sessionId}/status-simple`);
+  const data = await response.json();
+  return data;
+}
+```
+
+### 3. Search Images with Natural Language
+
+```bash
+curl -X POST http://localhost:5001/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "session_id": "your-session-id",
+    "chat_history": [
+      {"role": "human", "content": "Show me iPhone camera features in high quality"}
+    ]
+  }'
+```
+
+### 4. Advanced Search Examples
+
+```bash
+# Find specific image types
+curl -X POST http://localhost:5001/chat \
+  -d '{"session_id": "id", "chat_history": [{"role": "human", "content": "Hero banner images suitable for homepage"}]}'
+
+# Format-specific search
+curl -X POST http://localhost:5001/chat \
+  -d '{"session_id": "id", "chat_history": [{"role": "human", "content": "High-res PNG logos with transparent background"}]}'
+
+# Contextual search
+curl -X POST http://localhost:5001/chat \
+  -d '{"session_id": "id", "chat_history": [{"role": "human", "content": "Product photography without lifestyle context"}]}'
+```
+
+### 5. Clean Up Resources
+
+```bash
+# Delete specific session
+curl -X DELETE http://localhost:5001/sessions/your-session-id
+
+# Cleanup old sessions
+curl -X POST http://localhost:5001/cleanup \
+  -H "Content-Type: application/json" \
+  -d '{"hours_old": 6}'
+```
+
+## Integration Examples
+
+### React/Next.js Integration
+
+```javascript
+import { useState, useEffect } from "react";
+
+function ImageCrawler() {
+  const [session, setSession] = useState(null);
+  const [status, setStatus] = useState("idle");
+  const [results, setResults] = useState([]);
+
+  const startCrawl = async (url) => {
+    const response = await fetch("/crawl", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url, limit: 10 }),
+    });
+    const data = await response.json();
+    setSession(data.session_id);
+
+    // Start monitoring
+    monitorProgress(data.session_id);
+  };
+
+  const monitorProgress = (sessionId) => {
+    const eventSource = new EventSource(`/crawl/${sessionId}/status`);
+
+    eventSource.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      setStatus(data.type);
+
+      if (data.type === "completed") {
+        setStatus("ready");
+        eventSource.close();
+      }
+    };
+  };
+
+  const searchImages = async (query) => {
+    const response = await fetch("/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        session_id: session,
+        chat_history: [{ role: "human", content: query }],
+      }),
+    });
+    const data = await response.json();
+    setResults(data.search_results);
+  };
+
+  return <div>{/* Your UI components */}</div>;
+}
+```
+
+### Dynamic Website Generation
+
+```python
+# Example: Building personalized product pages
+from app.services.search import SearchService
+
+search_service = SearchService()
+
+# Get hero images for homepage
+hero_images = search_service.search_images_with_dedup(
+    "large banner hero images homepage",
+    namespace=f"session_{session_id}",
+    format_filter=["jpg", "png"],
+    max_results=3
+)
+
+# Get product grid images
+product_images = search_service.search_images_with_dedup(
+    "product photography clean background",
+    namespace=f"session_{session_id}",
+    max_results=20
+)
+
+# Build responsive image sets
+for img in hero_images:
+    responsive_variants = search_service.search_images_with_dedup(
+        f"similar to {img['alt_text']} different sizes",
+        namespace=f"session_{session_id}",
+        max_results=5
+    )
+```
+
+---
+
+**API Version:** 2.0.0  
+**Last Updated:** January 2024  
+**Built with Flask, OpenAI, Pinecone, and Firecrawl**
