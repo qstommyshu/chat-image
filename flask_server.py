@@ -238,19 +238,12 @@ def extract_context(img_tag):
     # Ensure total context doesn't exceed reasonable limits
     return context[:1000] if len(context) > 1000 else context
 
-def process_html_file(html_file_path, source_url):
-    """Process single HTML file and return document list"""
-    try:
-        with open(html_file_path, 'r', encoding='utf-8') as f:
-            html = f.read()
-    except UnicodeDecodeError:
-        try:
-            with open(html_file_path, 'r', encoding='latin-1') as f:
-                html = f.read()
-        except:
-            return []
+def process_html_content(html_content, source_url):
+    """Process HTML content directly and return document list"""
+    if not html_content:
+        return []
     
-    soup = BeautifulSoup(html, 'html.parser')
+    soup = BeautifulSoup(html_content, 'html.parser')
     parsed_url = urlparse(source_url)
     base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
     
@@ -299,7 +292,7 @@ def process_html_file(html_file_path, source_url):
                     'class': class_attr_limited,
                     'source_type': 'img',
                     'source_url': source_url[:1000] if source_url else '',  # Limit URL length
-                    'source_file': os.path.basename(html_file_path)[:200] if html_file_path else ''  # Limit filename
+                    'source_page': urlparse(source_url).path[:200] if source_url else ''  # Use URL path instead of filename
                 }
             )
             docs.append(doc)
@@ -353,15 +346,41 @@ def process_html_file(html_file_path, source_url):
                     'source_type': 'source',
                     'media': media_attr_limited,
                     'source_url': source_url[:1000] if source_url else '',  # Limit URL length
-                    'source_file': os.path.basename(html_file_path)[:200] if html_file_path else ''  # Limit filename
+                    'source_page': urlparse(source_url).path[:200] if source_url else ''  # Use URL path instead of filename
                 }
             )
             docs.append(doc)
     
     return docs
 
+def process_crawl_results_directly(crawl_result):
+    """Process Firecrawl results directly without saving to disk"""
+    print(f"\n🔄 Processing {len(crawl_result.data)} pages directly from crawl results")
+    
+    all_docs = []
+    
+    for i, page_data in enumerate(crawl_result.data, 1):
+        url = page_data.metadata.get('url', f'page_{i}')
+        print(f"Processing page {i}: {url}")
+        
+        # Fix relative image paths to absolute URLs
+        fixed_html = fix_image_paths(page_data.rawHtml, url)
+        
+        # Process HTML content directly
+        docs = process_html_content(fixed_html, url)
+        all_docs.extend(docs)
+        
+        # Count and report image elements found
+        soup = BeautifulSoup(fixed_html, 'html.parser')
+        img_count = len(soup.find_all('img'))
+        source_count = len(soup.find_all('source'))
+        print(f"  ✔ Found {img_count} img tags, {source_count} source tags")
+    
+    print(f"Processed {len(all_docs)} image documents")
+    return all_docs
+
 def load_html_folder(folder_path):
-    """Load all HTML files from folder"""
+    """Load all HTML files from folder (legacy function for backwards compatibility)"""
     print(f"\n📂 Loading HTML files from: {folder_path}")
     
     if not os.path.exists(folder_path):
@@ -380,7 +399,19 @@ def load_html_folder(folder_path):
     for html_file in html_files:
         filename = os.path.basename(html_file)
         source_url = filename_to_url(filename)
-        docs = process_html_file(html_file, source_url)
+        
+        # Read the HTML file content
+        try:
+            with open(html_file, 'r', encoding='utf-8') as f:
+                html_content = f.read()
+        except UnicodeDecodeError:
+            try:
+                with open(html_file, 'r', encoding='latin-1') as f:
+                    html_content = f.read()
+            except:
+                continue
+        
+        docs = process_html_content(html_content, source_url)
         all_docs.extend(docs)
     
     print(f"Processed {len(all_docs)} image documents")
@@ -434,7 +465,6 @@ def search_images_with_dedup(vector_store, query, namespace, format_filter=None,
             'score': score,
             'alt_match_score': alt_match_score,
             'source_url': doc.metadata['source_url'],
-            'source_file': doc.metadata['source_file'],
             'context': doc.page_content
         }
         processed_results.append(img_info)
@@ -676,7 +706,6 @@ class CrawlSession:
         limit (int): Maximum number of pages to crawl
         status (str): Current status (initializing, crawling, processing, indexing, completed, error)
         messages (Queue): Queue of status messages for SSE
-        folder_name (str): Folder where HTML files are saved
         total_images (int): Total number of images found
         total_pages (int): Total number of pages crawled
         error (str): Error message if crawl failed
@@ -691,7 +720,6 @@ class CrawlSession:
         self.limit = limit
         self.status = "initializing"
         self.messages = queue.Queue()
-        self.folder_name = None
         self.total_images = 0
         self.total_pages = 0
         self.error = None
@@ -722,8 +750,8 @@ def perform_crawl(session):
     
     This function handles the entire crawl lifecycle:
     1. Website crawling using Firecrawl
-    2. HTML processing and image extraction
-    3. Vector database creation for search
+    2. Direct HTML processing and image extraction (no disk storage)
+    3. Vector database indexing for search
     4. Status updates via SSE
     5. Cleanup of domain tracking
     
@@ -739,35 +767,44 @@ def perform_crawl(session):
             "message": f"Starting to crawl {session.url}"
         })
         
-        # Create unique folder name to avoid conflicts between sessions
+        # Get domain for tracking
         parsed_url = urlparse(session.url)
         domain = parsed_url.netloc.replace('www.', '')
-        base_folder = f"crawled_pages_{domain.replace('.', '_')}"
-        unique_folder = f"{base_folder}_{session.session_id[:8]}"
         
-        # Execute the crawl with session-specific folder
-        folder_name = crawl_website_with_folder(session.url, session.limit, unique_folder)
-        session.folder_name = folder_name
+        # Execute the crawl directly using Firecrawl
+        print(f"\n🕷️ Starting to crawl {session.url} (limit: {session.limit} pages)...")
+        
+        crawl_result = firecrawl_app.crawl_url(
+            session.url,
+            limit=session.limit,
+            scrape_options=ScrapeOptions(
+                formats=['rawHtml'],           # Get raw HTML content
+                onlyMainContent=False,         # Include full page content
+                includeTags=['img', 'source', 'picture', 'video'],  # Keep media tags
+                renderJs=True,                 # Execute JavaScript for dynamic content
+                waitFor=3000,                 # Wait 3 seconds for lazy loading
+                skipTlsVerification=False,     # Verify SSL certificates
+                removeBase64Images=False       # Keep base64-encoded images
+            ),
+        )
+        
+        print(f"✅ Successfully crawled {len(crawl_result.data)} pages")
+        session.total_pages = len(crawl_result.data)
         
         session.add_message("progress", {
-            "message": f"Successfully crawled {session.limit} pages",
-            "folder": folder_name
+            "message": f"Successfully crawled {session.total_pages} pages"
         })
         
-        # Phase 2: Image Processing
+        # Phase 2: Direct Image Processing (no disk I/O)
         session.status = "processing"
         session.add_message("status", {
             "status": "processing", 
-            "message": "Extracting images from HTML files"
+            "message": "Extracting images directly from crawled content"
         })
         
-        # Extract all images from the saved HTML files
-        all_docs = load_html_folder(folder_name)
+        # Process crawl results directly without saving to disk
+        all_docs = process_crawl_results_directly(crawl_result)
         session.total_images = len(all_docs)
-        
-        # Count actual HTML files processed
-        html_files = glob.glob(os.path.join(folder_name, "*.html"))
-        session.total_pages = len(html_files)
         
         # Generate statistics about images found
         format_stats = {}  # Count by image format (jpg, png, etc.)
@@ -788,7 +825,7 @@ def perform_crawl(session):
         }
         
         session.add_message("progress", {
-            "message": f"Processed {session.total_images} images from {session.total_pages} pages",
+            "message": f"Processed {session.total_images} images from {session.total_pages} pages (no disk storage needed)",
             "stats": session.image_stats
         })
         
@@ -870,8 +907,9 @@ def crawl():
     """
     Start a new website crawling session.
     
-    This endpoint initiates a background crawling operation and returns
-    a session ID that can be used to monitor progress and search results.
+    This endpoint initiates a background crawling operation that processes
+    content directly in memory without disk storage, then indexes images
+    in Pinecone for semantic search.
     
     Request Body:
         url (str): The URL to start crawling from
@@ -1235,7 +1273,7 @@ def cleanup_old_sessions():
 # ============================================================================
 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))
+    port = int(os.environ.get("PORT", 5001))
     # 生产环境务必关闭 debug，否则可能泄露内网信息
     debug = os.environ.get("FLASK_DEBUG", "0").lower() in ("1", "true", "yes")
     # 监听 0.0.0.0，才能让外部（Replit 容器）访问到
