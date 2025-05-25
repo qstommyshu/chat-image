@@ -103,6 +103,10 @@ crawl_lock = threading.Lock()  # Protects session creation and domain tracking
 active_crawls = {}  # Maps domain -> session_id to prevent duplicate crawls
 MAX_CONCURRENT_CRAWLS = 3  # Maximum number of simultaneous crawl operations
 
+# Production configuration
+ENABLE_SSE = os.environ.get("ENABLE_SSE", "true").lower() in ("true", "1", "yes")
+SSE_TIMEOUT_SECONDS = int(os.environ.get("SSE_TIMEOUT_SECONDS", "300"))  # 5 minutes default
+
 # ============================================================================
 # UTILITY FUNCTIONS FROM COMBINED.PY
 # ============================================================================
@@ -975,7 +979,9 @@ def crawl():
     return jsonify({
         "session_id": session_id,
         "message": "Crawling started",
-        "subscribe_url": f"/crawl/{session_id}/status"
+        "subscribe_url": f"/crawl/{session_id}/status",
+        "status_url_sse": f"/crawl/{session_id}/status",
+        "status_url_polling": f"/crawl/{session_id}/status-simple"
     })
 
 @app.route('/crawl/<session_id>/status')
@@ -990,11 +996,19 @@ def crawl_status(session_id):
         session_id (str): The session ID to monitor
         
     Returns:
-        SSE stream with status updates
+        SSE stream with status updates or redirect to polling endpoint
         
     Error Codes:
         404: Session not found
+        503: SSE disabled, use polling endpoint
     """
+    if not ENABLE_SSE:
+        return jsonify({
+            "error": "SSE disabled", 
+            "message": "Use polling endpoint instead",
+            "polling_url": f"/crawl/{session_id}/status-simple"
+        }), 503
+    
     session = crawl_sessions.get(session_id)
     
     if not session:
@@ -1007,29 +1021,104 @@ def crawl_status(session_id):
         This function yields status messages from the session's message queue
         and handles connection lifecycle (heartbeats, completion detection).
         """
-        # Send initial connection confirmation
-        yield f"data: {json.dumps({'type': 'connected', 'session_id': session_id})}\n\n"
-        
-        # Main message loop
-        while True:
-            try:
-                # Wait for new message (1 second timeout)
-                message = session.messages.get(timeout=1)
-                yield f"data: {json.dumps(message)}\n\n"
-                
-                # Close connection if crawl is finished (success or error)
-                if message.get('type') in ['completed', 'error']:
-                    break
+        try:
+            # Send initial connection confirmation
+            yield f"data: {json.dumps({'type': 'connected', 'session_id': session_id})}\n\n"
+            
+            # Timeout counter to prevent infinite connections
+            max_duration = SSE_TIMEOUT_SECONDS
+            heartbeat_count = 0
+            
+            # Main message loop
+            while heartbeat_count < max_duration:
+                try:
+                    # Wait for new message (1 second timeout)
+                    message = session.messages.get(timeout=1)
+                    yield f"data: {json.dumps(message)}\n\n"
                     
-            except queue.Empty:
-                # No new messages - send heartbeat to keep connection alive
-                yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
+                    # Close connection if crawl is finished (success or error)
+                    if message.get('type') in ['completed', 'error']:
+                        break
+                        
+                except queue.Empty:
+                    # No new messages - send heartbeat to keep connection alive
+                    heartbeat_count += 1
+                    yield f"data: {json.dumps({'type': 'heartbeat', 'time': heartbeat_count})}\n\n"
+                    
+                    # Check if session has finished (failsafe)
+                    if session.completed or session.error:
+                        # Send final status if available
+                        if session.completed:
+                            yield f"data: {json.dumps({'type': 'completed', 'status': 'completed'})}\n\n"
+                        elif session.error:
+                            yield f"data: {json.dumps({'type': 'error', 'status': 'error', 'message': session.error})}\n\n"
+                        break
                 
-                # Check if session has finished (failsafe)
-                if session.completed or session.error:
+                except Exception as e:
+                    # Handle any other exceptions gracefully
+                    yield f"data: {json.dumps({'type': 'error', 'message': f'SSE error: {str(e)}'})}\n\n"
                     break
+            
+            # Send timeout message if we reach max duration
+            if heartbeat_count >= max_duration:
+                timeout_minutes = max_duration // 60
+                yield f"data: {json.dumps({'type': 'timeout', 'message': f'Connection timeout after {timeout_minutes} minutes'})}\n\n"
+                
+        except Exception as e:
+            # Final safety net for any generator errors
+            try:
+                yield f"data: {json.dumps({'type': 'error', 'message': f'Generator error: {str(e)}'})}\n\n"
+            except:
+                # If even the error message fails, just end silently
+                pass
     
-    return Response(generate(), mimetype='text/event-stream')
+    response = Response(generate(), mimetype='text/event-stream')
+    response.headers['Cache-Control'] = 'no-cache'
+    response.headers['Connection'] = 'keep-alive'
+    response.headers['X-Accel-Buffering'] = 'no'  # Disable Nginx buffering if present
+    return response
+
+@app.route('/crawl/<session_id>/status-simple', methods=['GET'])
+def crawl_status_simple(session_id):
+    """
+    Simple polling-based status endpoint (alternative to SSE).
+    
+    This endpoint provides a simple JSON response with current status,
+    useful for environments where SSE doesn't work reliably.
+    
+    Args:
+        session_id (str): The session ID to check
+        
+    Returns:
+        JSON response with current status and recent messages
+        
+    Error Codes:
+        404: Session not found
+    """
+    session = crawl_sessions.get(session_id)
+    
+    if not session:
+        return jsonify({"error": "Session not found"}), 404
+    
+    # Collect any pending messages (drain the queue)
+    messages = []
+    try:
+        while True:
+            message = session.messages.get_nowait()
+            messages.append(message)
+    except queue.Empty:
+        pass
+    
+    return jsonify({
+        "session_id": session_id,
+        "status": session.status,
+        "completed": session.completed,
+        "error": session.error,
+        "total_images": session.total_images,
+        "total_pages": session.total_pages,
+        "messages": messages,
+        "image_stats": session.image_stats
+    })
 
 @app.route('/chat', methods=['POST'])
 def chat():
