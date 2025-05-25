@@ -4,6 +4,13 @@
 
 The Flask Image Search API provides endpoints for crawling websites and searching for images using natural language queries. It supports real-time status updates via Server-Sent Events (SSE) and maintains session-based vector databases for efficient image searching.
 
+The API has been refactored into a modular architecture with clearly separated responsibilities:
+
+- Route handlers for API endpoints
+- Service layer for business logic
+- Data models for structured data
+- Utility functions for common operations
+
 ## Base URL
 
 ```
@@ -41,6 +48,12 @@ Initiates a crawling job for the specified website.
   "subscribe_url": "/crawl/550e8400-e29b-41d4-a716-446655440000/status"
 }
 ```
+
+#### Error Responses
+
+- `400 Bad Request`: Missing or invalid URL
+- `409 Conflict`: Domain already being crawled
+- `429 Too Many Requests`: Maximum concurrent crawls reached
 
 ### 2. Crawl Status (SSE)
 
@@ -160,7 +173,7 @@ Search for images using natural language queries based on the crawled content.
 
 ```json
 {
-  "response": "I'll help you find iPhone camera images\n\nI found 5 relevant images:\n\n🖼️ **Image 1**\n- Format: JPG\n- Description: iPhone 15 Pro Camera System\n- [Image URL](https://...)\n- [Source Page](https://...)",
+  "response": "I'll help you find iPhone camera images\n\nI found 5 relevant images:",
   "search_results": [
     {
       "url": "https://www.apple.com/images/iphone-camera.jpg",
@@ -173,6 +186,12 @@ Search for images using natural language queries based on the crawled content.
   "session_id": "550e8400-e29b-41d4-a716-446655440000"
 }
 ```
+
+#### Error Responses
+
+- `400 Bad Request`: Missing session_id or invalid chat history
+- `404 Not Found`: Session not found or vector database missing
+- `400 Bad Request`: Crawling not yet completed
 
 ### 4. List Sessions
 
@@ -198,7 +217,53 @@ Get a list of all crawl sessions.
 }
 ```
 
-### 5. Health Check
+### 5. Delete Session
+
+**DELETE** `/sessions/<session_id>`
+
+Delete a specific session and free its resources.
+
+#### Response
+
+```json
+{
+  "message": "Session 550e8400-e29b-41d4-a716-446655440000 deleted successfully"
+}
+```
+
+#### Error Responses
+
+- `404 Not Found`: Session not found
+
+### 6. Clean Up Old Sessions
+
+**POST** `/cleanup`
+
+Clean up old completed sessions to free memory.
+
+#### Request Body
+
+```json
+{
+  "hours_old": 24
+}
+```
+
+| Field     | Type    | Required | Description                          |
+| --------- | ------- | -------- | ------------------------------------ |
+| hours_old | integer | No       | Age threshold in hours (default: 24) |
+
+#### Response
+
+```json
+{
+  "message": "Cleaned up 3 old sessions",
+  "deleted_sessions": ["id1", "id2", "id3"],
+  "remaining_sessions": 2
+}
+```
+
+### 7. Health Check
 
 **GET** `/health`
 
@@ -209,9 +274,20 @@ Check if the server is running.
 ```json
 {
   "status": "healthy",
-  "version": "1.0.0"
+  "version": "1.0.0",
+  "active_sessions": 5,
+  "active_crawls": 2
 }
 ```
+
+## Concurrency Controls
+
+The API implements several concurrency controls:
+
+1. **Domain Locking**: Only one crawl per domain is allowed at a time
+2. **Maximum Concurrent Crawls**: A limit on the number of simultaneous crawling operations
+3. **Session Isolation**: Each session has its own vector database and folder
+4. **Resource Cleanup**: Automatic cleanup of old sessions to free resources
 
 ## Example Usage Flow
 
@@ -228,43 +304,45 @@ Check if the server is running.
 
 3. **Search for images:**
    Once crawling is completed, use the chat endpoint with the session_id:
+
    ```bash
    curl -X POST http://127.0.0.1:5000/chat \
      -H "Content-Type: application/json" \
      -d '{
        "session_id": "YOUR_SESSION_ID",
        "chat_history": [
-         {"role": "ai", "content": "Initial message from completed crawl..."},
          {"role": "human", "content": "Show me product images"}
        ]
      }'
    ```
 
-## Error Handling
+4. **Clean up resources:**
+   When done, delete the session to free up resources:
+   ```bash
+   curl -X DELETE http://127.0.0.1:5000/sessions/YOUR_SESSION_ID
+   ```
 
-All endpoints return appropriate HTTP status codes:
+## Project Architecture
 
-- `200` - Success
-- `400` - Bad Request (missing or invalid parameters)
-- `404` - Not Found (session not found)
-- `500` - Internal Server Error
+The API is built using a modular architecture:
 
-Error responses include a JSON body:
-
-```json
-{
-  "error": "Description of the error"
-}
 ```
-
-## CORS
-
-The server has CORS enabled for all origins. In production, you should configure this to only allow specific origins.
+app/
+├── routes/               # API endpoints
+│   ├── admin_routes.py   # Session management
+│   ├── crawl_routes.py   # Website crawling
+│   └── search_routes.py  # Image search
+├── services/             # Business logic
+│   ├── crawler.py        # Crawling service
+│   └── search.py         # Search service
+└── models/               # Data models
+    └── session.py        # CrawlSession class
+```
 
 ## Running the Server
 
 ```bash
-python flask_server.py
+python server.py
 ```
 
-The server will start on `http://localhost:5000` in debug mode.
+The server will start on `http://127.0.0.1:5000` using the configuration from `app/config.py`.

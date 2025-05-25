@@ -11,6 +11,7 @@ This system crawls any website to extract images and provides multiple interface
 - 💬 **Multiple Interfaces**: CLI, Web UI, and REST API
 - 📊 **Vector Search**: Uses embeddings for semantic image search
 - 🔄 **Real-time Updates**: Server-Sent Events for crawl progress monitoring
+- 🔒 **Concurrency Controls**: Domain locking and session isolation
 
 ## Prerequisites
 
@@ -55,7 +56,7 @@ python app.py https://www.apple.com/iphone 20
 Start the Flask server:
 
 ```bash
-python flask_server.py
+python server.py
 ```
 
 Then either:
@@ -95,19 +96,38 @@ Once the system is ready, you can search using natural language:
 - "Find iPhone camera pictures"
 - "Apple Watch PNG images"
 
-## File Structure
+## Project Architecture
+
+The application has been refactored into a modular, maintainable architecture:
 
 ```
-.
-├── app.py                 # CLI entry point
-├── combined.py            # Core crawler and search functionality
-├── flask_server.py        # Flask API server
-├── client_example.html    # Web UI example
-├── API_DOCUMENTATION.md   # Detailed API docs
-├── crawled_pages_*/       # Folders with crawled HTML files (auto-created)
-├── requirements.txt       # Python dependencies
-└── .env                  # API keys (create this)
+app/
+├── __init__.py           # Application factory
+├── config.py             # Configuration settings
+├── models/               # Data models
+│   └── session.py        # CrawlSession class
+├── routes/               # API endpoints
+│   ├── admin_routes.py   # Session management
+│   ├── crawl_routes.py   # Website crawling
+│   └── search_routes.py  # Image search
+├── services/             # Business logic
+│   ├── crawler.py        # Crawling service
+│   └── search.py         # Search service
+└── utils/                # Helper functions
+    └── helpers.py        # Utility functions
+server.py                 # Entry point
+combined.py               # Core functionality
+requirements.txt          # Dependencies
+.env                      # API keys (create this)
 ```
+
+## Key Components
+
+1. **Flask Application**: The main application using blueprints for route organization
+2. **Services Layer**: Business logic for crawling and searching
+3. **Models**: Data models for sessions and results
+4. **Routes**: API endpoints organized by function
+5. **Utils**: Shared utility functions
 
 ## API Endpoints
 
@@ -118,6 +138,8 @@ Once the system is ready, you can search using natural language:
 | `/chat`              | POST   | Search images with natural language |
 | `/sessions`          | GET    | List all crawl sessions             |
 | `/health`            | GET    | Health check                        |
+| `/sessions/<id>`     | DELETE | Delete a specific session           |
+| `/cleanup`           | POST   | Clean up old sessions               |
 
 See [API_DOCUMENTATION.md](API_DOCUMENTATION.md) for detailed API usage.
 
@@ -144,33 +166,47 @@ See [API_DOCUMENTATION.md](API_DOCUMENTATION.md) for detailed API usage.
 - Contextual search based on Alt text
 - Semantic similarity matching
 
+### Concurrency Management
+
+- Domain locking prevents duplicate crawls
+- Session isolation with unique vector databases
+- Resource limiting to prevent overload
+- Automatic cleanup of old sessions
+
 ## Troubleshooting
 
 1. **API Key Errors**: Make sure your `.env` file contains valid API keys
 2. **Crawling Issues**: Some websites may block crawlers; try reducing the number of pages
 3. **Memory Issues**: For large websites, consider crawling fewer pages at once
 4. **No Images Found**: Some websites load images dynamically; the crawler waits for JS but may miss some
+5. **Concurrent Crawls**: If you get a 429 error, wait for some crawls to complete
 
 ## Advanced Usage
 
-### Direct Module Usage
-
-```python
-from combined import crawl_website, load_html_folder, conversational_search
-
-# Crawl a website
-folder = crawl_website("https://example.com", limit=10)
-
-# Load and process HTML files
-docs = load_html_folder(folder)
-
-# Start search interface
-conversational_search(chroma_db)
-```
-
 ### Using with Your Own Frontend
 
-The Flask server provides a simple REST API that can be integrated with any frontend framework. See the `client_example.html` for a reference implementation.
+The Flask server provides a RESTful API that can be integrated with any frontend framework:
+
+```javascript
+// Start a crawl
+fetch("http://127.0.0.1:5000/crawl", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ url: "https://example.com", limit: 5 }),
+})
+  .then((response) => response.json())
+  .then((data) => {
+    const sessionId = data.session_id;
+    // Use session_id for status updates and searching
+  });
+
+// Subscribe to SSE updates
+const eventSource = new EventSource(`/crawl/${sessionId}/status`);
+eventSource.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+  console.log("Status update:", data);
+};
+```
 
 ## Notes
 
