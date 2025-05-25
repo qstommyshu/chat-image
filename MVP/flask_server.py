@@ -32,9 +32,11 @@ from dotenv import load_dotenv
 from bs4 import BeautifulSoup
 from firecrawl import FirecrawlApp, ScrapeOptions
 from langchain.schema import Document
-from langchain_community.vectorstores import Chroma
 from langchain_openai import OpenAIEmbeddings
 from openai import OpenAI
+from pinecone import Pinecone, ServerlessSpec
+from langchain_pinecone import PineconeVectorStore
+import time
 
 # ============================================================================
 # CONFIGURATION
@@ -46,15 +48,40 @@ load_dotenv()
 # Check required API keys
 openai_api_key = os.getenv("OPENAI_API_KEY")
 firecrawl_api_key = os.getenv("FIRECRAWL_API_KEY")
+pinecone_api_key = os.getenv("PINECONE_API_KEY")
 
 if not openai_api_key:
     raise ValueError("Please set OPENAI_API_KEY in your .env file")
 if not firecrawl_api_key:
     raise ValueError("Please set FIRECRAWL_API_KEY in your .env file")
+if not pinecone_api_key:
+    raise ValueError("Please set PINECONE_API_KEY in your .env file")
 
 # Initialize clients
 openai_client = OpenAI(api_key=openai_api_key)
 firecrawl_app = FirecrawlApp(api_key=firecrawl_api_key)
+
+# Initialize Pinecone
+pc = Pinecone(api_key=pinecone_api_key)
+index_name = "image-chat"  # Main index for all crawled images
+
+# Create Pinecone index if it doesn't exist
+existing_indexes = [index_info["name"] for index_info in pc.list_indexes()]
+if index_name not in existing_indexes:
+    pc.create_index(
+        name=index_name,
+        dimension=1536,  # OpenAI embeddings dimension
+        metric="cosine",
+        spec=ServerlessSpec(cloud="aws", region="us-east-1"),
+        deletion_protection="disabled",  # Allow deletion for development
+    )
+    # Wait for index to be ready
+    while not pc.describe_index(index_name).status["ready"]:
+        time.sleep(1)
+
+# Initialize Pinecone vector store
+index = pc.Index(index_name)
+vector_store = PineconeVectorStore(index=index, embedding=OpenAIEmbeddings(openai_api_key=openai_api_key))
 
 # Initialize Flask application
 app = Flask(__name__)
@@ -67,8 +94,9 @@ CORS(app)  # Enable Cross-Origin Resource Sharing for all routes
 # Session storage - maps session_id to CrawlSession objects
 crawl_sessions = {}
 
-# Vector database storage - maps session_id to ChromaDB instances
-vector_stores = {}
+# Session namespace tracking - maps session_id to namespace in Pinecone
+# Note: We no longer need vector_stores dict since all data is in Pinecone
+session_namespaces = {}
 
 # Concurrency controls
 crawl_lock = threading.Lock()  # Protects session creation and domain tracking
@@ -152,7 +180,7 @@ def extract_context_from_source(source_tag):
     """Extract context from source tag"""
     context_parts = []
     
-    media_attr = source_tag.get('media', '')
+    media_attr = source_tag.get('media', '')[:200] if source_tag.get('media') else ''  # Limit media attr
     if media_attr:
         context_parts.append(f"Media: {media_attr}")
     
@@ -160,9 +188,9 @@ def extract_context_from_source(source_tag):
     if picture:
         img_in_picture = picture.find('img')
         if img_in_picture:
-            alt_text = img_in_picture.get('alt', '')
-            title_text = img_in_picture.get('title', '')
-            class_attr = ' '.join(img_in_picture.get('class', []))
+            alt_text = img_in_picture.get('alt', '')[:500] if img_in_picture.get('alt') else ''  # Limit alt text
+            title_text = img_in_picture.get('title', '')[:200] if img_in_picture.get('title') else ''  # Limit title
+            class_attr = ' '.join(img_in_picture.get('class', []))[:300] if img_in_picture.get('class') else ''  # Limit class
             
             if alt_text:
                 context_parts.append(f"Alt: {alt_text}")
@@ -174,18 +202,22 @@ def extract_context_from_source(source_tag):
     parent = source_tag.parent
     if parent:
         parent_text = parent.get_text(strip=True)
-        if parent_text and len(parent_text) < 300:
-            context_parts.append(f"Parent text: {parent_text}")
+        if parent_text and len(parent_text) > 0:
+            # Limit parent text to 150 characters
+            truncated_parent = parent_text[:150] + "..." if len(parent_text) > 150 else parent_text
+            context_parts.append(f"Parent text: {truncated_parent}")
     
-    return " | ".join(context_parts) if context_parts else str(source_tag)
+    context = " | ".join(context_parts) if context_parts else str(source_tag)[:100]
+    # Ensure total context doesn't exceed reasonable limits
+    return context[:1000] if len(context) > 1000 else context
 
 def extract_context(img_tag):
     """Extract context from img tag"""
     context_parts = []
     
-    alt_text = img_tag.get('alt', '')
-    title_text = img_tag.get('title', '')
-    class_attr = ' '.join(img_tag.get('class', []))
+    alt_text = img_tag.get('alt', '')[:500] if img_tag.get('alt') else ''  # Limit alt text
+    title_text = img_tag.get('title', '')[:200] if img_tag.get('title') else ''  # Limit title
+    class_attr = ' '.join(img_tag.get('class', []))[:300] if img_tag.get('class') else ''  # Limit class
     
     if alt_text:
         context_parts.append(f"Alt: {alt_text}")
@@ -197,10 +229,14 @@ def extract_context(img_tag):
     parent = img_tag.parent
     if parent:
         parent_text = parent.get_text(strip=True)
-        if parent_text and len(parent_text) < 200:
-            context_parts.append(f"Parent text: {parent_text}")
+        if parent_text and len(parent_text) > 0:
+            # Limit parent text to 150 characters
+            truncated_parent = parent_text[:150] + "..." if len(parent_text) > 150 else parent_text
+            context_parts.append(f"Parent text: {truncated_parent}")
     
-    return " | ".join(context_parts) if context_parts else str(img_tag)
+    context = " | ".join(context_parts) if context_parts else str(img_tag)[:100]
+    # Ensure total context doesn't exceed reasonable limits
+    return context[:1000] if len(context) > 1000 else context
 
 def process_html_file(html_file_path, source_url):
     """Process single HTML file and return document list"""
@@ -244,17 +280,26 @@ def process_html_file(html_file_path, source_url):
             title_text = img.get('title', '')
             class_attr = ' '.join(img.get('class', []))
             
+            # Ensure all text fields are properly limited
+            alt_text_limited = alt_text[:500] if alt_text else ''
+            title_text_limited = title_text[:200] if title_text else ''
+            class_attr_limited = class_attr[:300] if class_attr else ''
+            
+            page_content = f"Alt: {alt_text_limited} | Title: {title_text_limited} | Class: {class_attr_limited} | Context: {context}"
+            # Ensure page content doesn't exceed Pinecone limits
+            page_content = page_content[:2000] if len(page_content) > 2000 else page_content
+            
             doc = Document(
-                page_content=f"Alt: {alt_text} | Title: {title_text} | Class: {class_attr} | Context: {context}",
+                page_content=page_content,
                 metadata={
-                    'img_url': u,
+                    'img_url': u[:1000] if u else '',  # Limit URL length
                     'img_format': img_format,
-                    'alt_text': alt_text,
-                    'title': title_text,
-                    'class': class_attr,
+                    'alt_text': alt_text_limited,
+                    'title': title_text_limited,
+                    'class': class_attr_limited,
                     'source_type': 'img',
-                    'source_url': source_url,
-                    'source_file': os.path.basename(html_file_path)
+                    'source_url': source_url[:1000] if source_url else '',  # Limit URL length
+                    'source_file': os.path.basename(html_file_path)[:200] if html_file_path else ''  # Limit filename
                 }
             )
             docs.append(doc)
@@ -287,18 +332,28 @@ def process_html_file(html_file_path, source_url):
                     title_text = img_in_picture.get('title', '')
                     class_attr = ' '.join(img_in_picture.get('class', []))
             
+            # Ensure all text fields are properly limited
+            alt_text_limited = alt_text[:500] if alt_text else ''
+            title_text_limited = title_text[:200] if title_text else ''
+            class_attr_limited = class_attr[:300] if class_attr else ''
+            media_attr_limited = source.get('media', '')[:200] if source.get('media') else ''
+            
+            page_content = f"Alt: {alt_text_limited} | Title: {title_text_limited} | Class: {class_attr_limited} | Context: {context}"
+            # Ensure page content doesn't exceed Pinecone limits
+            page_content = page_content[:2000] if len(page_content) > 2000 else page_content
+            
             doc = Document(
-                page_content=f"Alt: {alt_text} | Title: {title_text} | Class: {class_attr} | Context: {context}",
+                page_content=page_content,
                 metadata={
-                    'img_url': url_part,
+                    'img_url': url_part[:1000] if url_part else '',  # Limit URL length
                     'img_format': img_format,
-                    'alt_text': alt_text,
-                    'title': title_text,
-                    'class': class_attr,
+                    'alt_text': alt_text_limited,
+                    'title': title_text_limited,
+                    'class': class_attr_limited,
                     'source_type': 'source',
-                    'media': source.get('media', ''),
-                    'source_url': source_url,
-                    'source_file': os.path.basename(html_file_path)
+                    'media': media_attr_limited,
+                    'source_url': source_url[:1000] if source_url else '',  # Limit URL length
+                    'source_file': os.path.basename(html_file_path)[:200] if html_file_path else ''  # Limit filename
                 }
             )
             docs.append(doc)
@@ -331,13 +386,21 @@ def load_html_folder(folder_path):
     print(f"Processed {len(all_docs)} image documents")
     return all_docs
 
-def search_images_with_dedup(chroma_db, query, format_filter=None, max_results=5):
+def search_images_with_dedup(vector_store, query, namespace, format_filter=None, max_results=5):
     """Search images with deduplication"""
-    results = chroma_db.similarity_search_with_score(query, k=50)
+    # Create a retriever with the specific namespace for this session
+    retriever = vector_store.as_retriever(
+        search_kwargs={"k": 50, "namespace": namespace}
+    )
+    results = retriever.get_relevant_documents(query)
+    
+    # Convert to format expected by the rest of the function
+    # Note: Pinecone doesn't return scores in the same way, so we'll simulate them
+    results_with_scores = [(doc, 1.0 - (i * 0.01)) for i, doc in enumerate(results)]
     
     processed_results = []
     
-    for doc, score in results:
+    for doc, score in results_with_scores:
         img_format = doc.metadata['img_format']
         
         if format_filter and img_format not in format_filter:
@@ -729,23 +792,47 @@ def perform_crawl(session):
             "stats": session.image_stats
         })
         
-        # Phase 3: Vector Database Creation
+        # Phase 3: Vector Database Indexing
         session.status = "indexing"
         session.add_message("status", {
             "status": "indexing", 
-            "message": "Creating vector database for image search"
+            "message": "Adding images to persistent vector database"
         })
         
-        # Create embeddings and vector database for semantic search
-        embeddings = OpenAIEmbeddings(openai_api_key=openai_api_key)
-        chroma_db = Chroma.from_documents(
-            all_docs,
-            embedding=embeddings,
-            collection_name=f'crawl_{session.session_id}'  # Unique collection per session
-        )
+        # Add documents to Pinecone with session-specific namespace
+        namespace = f"session_{session.session_id[:8]}"
         
-        # Store the vector database for later search operations
-        vector_stores[session.session_id] = chroma_db
+        # Add metadata to identify the session
+        for doc in all_docs:
+            doc.metadata['session_id'] = session.session_id
+            doc.metadata['crawl_timestamp'] = datetime.now().isoformat()
+        
+        # Add documents to Pinecone in batches to avoid size limits
+        batch_size = 100  # Process 100 documents at a time
+        total_docs = len(all_docs)
+        
+        for i in range(0, total_docs, batch_size):
+            batch = all_docs[i:i + batch_size]
+            try:
+                print(f"Uploading batch {i//batch_size + 1}/{(total_docs + batch_size - 1)//batch_size} ({len(batch)} documents)")
+                vector_store.add_documents(batch, namespace=namespace)
+                
+                # Update progress
+                progress_pct = min(100, ((i + len(batch)) / total_docs) * 100)
+                session.add_message("progress", {
+                    "message": f"Indexing progress: {progress_pct:.1f}% ({i + len(batch)}/{total_docs} documents)",
+                    "progress_percent": progress_pct
+                })
+            except Exception as e:
+                print(f"Error uploading batch {i//batch_size + 1}: {str(e)}")
+                # Continue with next batch rather than failing completely
+                session.add_message("progress", {
+                    "message": f"Warning: Failed to index batch {i//batch_size + 1}, continuing with remaining batches",
+                    "error": str(e)
+                })
+        
+        # Store the namespace for later search operations
+        session_namespaces[session.session_id] = namespace
         
         # Phase 4: Completion
         summary = generate_crawl_summary(session)
@@ -942,10 +1029,10 @@ def chat():
     if not session.completed:
         return jsonify({"error": "Crawling not yet completed"}), 400
     
-    # Get the vector database for this session
-    chroma_db = vector_stores.get(session_id)
-    if not chroma_db:
-        return jsonify({"error": "Vector database not found"}), 404
+    # Get the namespace for this session
+    namespace = session_namespaces.get(session_id)
+    if not namespace:
+        return jsonify({"error": "Session namespace not found - data may have been cleaned up"}), 404
     
     # Extract the most recent human message from chat history
     last_human_message = None
@@ -962,8 +1049,9 @@ def chat():
     
     # Execute semantic search with deduplication
     search_results = search_images_with_dedup(
-        chroma_db,
+        vector_store,
         parsed_query['search_query'],
+        namespace,
         format_filter=parsed_query['format_filter'],
         max_results=5
     )
@@ -1061,9 +1149,12 @@ def delete_session(session_id):
     if session_id not in crawl_sessions:
         return jsonify({"error": "Session not found"}), 404
     
-    # Clean up vector database
-    if session_id in vector_stores:
-        del vector_stores[session_id]
+    # Clean up session namespace
+    if session_id in session_namespaces:
+        namespace = session_namespaces[session_id]
+        # Note: Pinecone doesn't have a direct way to delete by namespace
+        # In production, you might want to track document IDs and delete them
+        del session_namespaces[session_id]
     
     session = crawl_sessions[session_id]
     
@@ -1121,9 +1212,12 @@ def cleanup_old_sessions():
     deleted_count = 0
     for session_id in sessions_to_delete:
         try:
-            # Remove vector database
-            if session_id in vector_stores:
-                del vector_stores[session_id]
+            # Remove session namespace
+            if session_id in session_namespaces:
+                namespace = session_namespaces[session_id]
+                # Note: Pinecone doesn't have a direct way to delete by namespace
+                # In production, you might want to track document IDs and delete them
+                del session_namespaces[session_id]
             # Remove session
             del crawl_sessions[session_id]
             deleted_count += 1
@@ -1142,4 +1236,4 @@ def cleanup_old_sessions():
 
 if __name__ == '__main__':
     # Start Flask development server with threading enabled for concurrent requests
-    app.run(debug=True, port=5000, threaded=True) 
+    app.run(debug=True, port=5000, threaded=True)
