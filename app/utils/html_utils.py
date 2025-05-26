@@ -2,27 +2,28 @@
 HTML Processing Utilities
 
 This module contains utility functions for processing HTML content,
-extracting image information, and handling URL transformations.
+extracting image information, and handling URL transformations for
+direct memory processing (no disk storage).
 """
 
-import re
 from urllib.parse import urlparse, urljoin
 from bs4 import BeautifulSoup
 
 
-def url_to_filename(url: str) -> str:
-    """Convert URL to safe filename."""
-    filename = url.replace('https://', '').replace('http://', '')
-    filename = re.sub(r'[<>:"/\\|?*]', '_', filename)
-    filename = filename.replace('/', '_')
-    filename = filename.rstrip('.')
-    if not filename.endswith('.html'):
-        filename += '.html'
-    return filename
-
-
 def fix_image_paths(html_content: str, base_url: str) -> str:
-    """Fix relative image paths in HTML content to absolute URLs."""
+    """
+    Fix relative image paths in HTML content to absolute URLs.
+    
+    This is essential for direct memory processing since relative paths
+    from crawled HTML need to be converted to absolute URLs.
+    
+    Args:
+        html_content: Raw HTML content from crawling
+        base_url: Base URL to resolve relative paths against
+        
+    Returns:
+        HTML content with absolute image URLs
+    """
     soup = BeautifulSoup(html_content, 'html.parser')
     
     # Process img tags
@@ -55,19 +56,16 @@ def fix_image_paths(html_content: str, base_url: str) -> str:
     return str(soup)
 
 
-def filename_to_url(filename: str) -> str:
-    """Convert filename back to original URL."""
-    name_without_ext = filename.replace('.html', '')
-    url_path = name_without_ext.replace('_', '/')
-    
-    if url_path.startswith('www.'):
-        return f"https://{url_path}"
-    else:
-        return f"https://{url_path}"
-
-
 def get_image_format(url: str) -> str:
-    """Get image format from URL."""
+    """
+    Get image format from URL.
+    
+    Args:
+        url: Image URL to analyze
+        
+    Returns:
+        Image format string (jpg, png, svg, webp, gif, unknown)
+    """
     url_lower = url.lower()
     if any(ext in url_lower for ext in ['.jpg', '.jpeg']):
         return 'jpg'
@@ -84,7 +82,15 @@ def get_image_format(url: str) -> str:
 
 
 def extract_context_from_source(source_tag) -> str:
-    """Extract context information from a source tag."""
+    """
+    Extract context information from a source tag.
+    
+    Args:
+        source_tag: BeautifulSoup source tag element
+        
+    Returns:
+        Context string with media attributes and parent information
+    """
     context_parts = []
     
     media_attr = source_tag.get('media', '')[:200] if source_tag.get('media') else ''
@@ -118,7 +124,15 @@ def extract_context_from_source(source_tag) -> str:
 
 
 def extract_context(img_tag) -> str:
-    """Extract context information from an img tag."""
+    """
+    Extract context information from an img tag.
+    
+    Args:
+        img_tag: BeautifulSoup img tag element
+        
+    Returns:
+        Context string with alt text, title, class, and parent information
+    """
     context_parts = []
     
     alt_text = img_tag.get('alt', '')[:500] if img_tag.get('alt') else ''
@@ -140,4 +154,6 @@ def extract_context(img_tag) -> str:
             context_parts.append(f"Parent text: {truncated_parent}")
     
     context = " | ".join(context_parts) if context_parts else str(img_tag)[:100]
-    return context[:1000] if len(context) > 1000 else context 
+    return context[:1000] if len(context) > 1000 else context
+
+ 

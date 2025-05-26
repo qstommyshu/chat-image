@@ -5,8 +5,7 @@ This module handles processing HTML content and extracting image documents
 for vector database indexing.
 """
 
-import os
-import glob
+
 from datetime import datetime
 from urllib.parse import urlparse
 from bs4 import BeautifulSoup
@@ -14,7 +13,7 @@ from langchain.schema import Document
 
 from app.utils.html_utils import (
     fix_image_paths, get_image_format, extract_context, 
-    extract_context_from_source, filename_to_url
+    extract_context_from_source
 )
 
 
@@ -64,44 +63,6 @@ class HTMLProcessor:
             img_count = len(soup.find_all('img'))
             source_count = len(soup.find_all('source'))
             print(f"  ✔ Found {img_count} img tags, {source_count} source tags")
-        
-        print(f"Processed {len(all_docs)} image documents")
-        return all_docs
-    
-    def load_html_folder(self, folder_path: str) -> list[Document]:
-        """Load all HTML files from folder (legacy function for backwards compatibility)."""
-        print(f"\n📂 Loading HTML files from: {folder_path}")
-        
-        if not os.path.exists(folder_path):
-            raise ValueError(f"Folder does not exist: {folder_path}")
-        
-        html_pattern = os.path.join(folder_path, "*.html")
-        html_files = glob.glob(html_pattern)
-        
-        if not html_files:
-            raise ValueError(f"No HTML files found in folder: {folder_path}")
-        
-        print(f"Found {len(html_files)} HTML files")
-        
-        all_docs = []
-        
-        for html_file in html_files:
-            filename = os.path.basename(html_file)
-            source_url = filename_to_url(filename)
-            
-            # Read the HTML file content
-            try:
-                with open(html_file, 'r', encoding='utf-8') as f:
-                    html_content = f.read()
-            except UnicodeDecodeError:
-                try:
-                    with open(html_file, 'r', encoding='latin-1') as f:
-                        html_content = f.read()
-                except:
-                    continue
-            
-            docs = self.process_html_content(html_content, source_url)
-            all_docs.extend(docs)
         
         print(f"Processed {len(all_docs)} image documents")
         return all_docs
