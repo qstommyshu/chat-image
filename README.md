@@ -644,6 +644,236 @@ def poll_status(session_id):
     })
 ```
 
+## 🧭 Code Walkthrough
+
+### 📁 **Quick Navigation Guide**
+
+For developers wanting to understand or modify the system, here's a practical walkthrough of the key files:
+
+#### **🚀 Starting Point**
+
+```bash
+server.py                 # Main entry point - Flask app initialization
+├── from app import create_app()    # Uses app factory pattern
+└── Runs on configurable port      # Default: 5001
+```
+
+#### **🏗️ Core Architecture Files**
+
+```bash
+app/__init__.py           # App factory + blueprint registration
+├── create_app()         # Main factory function
+├── register_blueprints() # API route organization
+└── CORS + error handling # Production-ready setup
+
+app/config.py            # Single source of truth for configuration
+├── Config class         # Environment variables + validation
+└── ClientManager class  # Lazy-loaded external service clients
+```
+
+#### **📊 Data Layer**
+
+```bash
+app/models/session.py    # Session management and state tracking
+├── CrawlSession        # Individual crawl state + progress
+├── SessionManager      # Thread-safe session operations
+└── Concurrency control # Rate limiting + cleanup
+```
+
+#### **⚙️ Business Logic**
+
+```bash
+app/services/crawler.py  # Orchestrates the complete crawl workflow
+├── start_crawl()       # Entry point for background crawling
+├── _perform_crawl()    # Main workflow: crawl → process → index
+└── _index_documents_in_batches() # Efficient Pinecone uploads
+
+app/services/processor.py # HTML processing and document creation
+├── process_crawl_results_directly() # No-disk-storage processing
+├── process_html_content() # Soup parsing + context extraction
+└── _process_img_tags()   # Multi-source image discovery
+
+app/services/search.py   # AI-powered search with deduplication
+├── search_images_with_dedup() # Main search entry point
+├── parse_user_query_with_ai() # Natural language understanding
+└── _deduplicate_results()     # Smart duplicate removal
+```
+
+#### **🌐 API Layer**
+
+```bash
+app/api/crawl.py        # Crawling operations
+├── POST /crawl         # Start new crawl session
+├── GET /sessions       # List all sessions
+└── DELETE /sessions/{id} # Cleanup operations
+
+app/api/status.py       # Real-time progress monitoring
+├── GET /crawl/{id}/status        # Server-Sent Events stream
+└── GET /crawl/{id}/status-simple # Polling fallback
+
+app/api/chat.py         # Natural language image search
+└── POST /chat          # AI-powered search endpoint
+```
+
+#### **🔧 Utilities**
+
+```bash
+app/utils/html_utils.py # HTML processing helpers
+├── fix_image_paths()   # Relative → absolute URL conversion
+├── get_image_format()  # Format detection from URLs
+└── extract_context()   # Rich context building for embeddings
+```
+
+### 🔍 **Key Code Patterns**
+
+#### **1. Adding a New API Endpoint**
+
+```python
+# Create new blueprint file: app/api/my_feature.py
+from flask import Blueprint, request, jsonify
+from app.config import clients
+
+my_feature_bp = Blueprint('my_feature', __name__)
+
+@my_feature_bp.route('/my-endpoint', methods=['POST'])
+def my_endpoint():
+    # Business logic here
+    return jsonify({"status": "success"})
+
+# Register in app/__init__.py
+from app.api.my_feature import my_feature_bp
+app.register_blueprint(my_feature_bp)
+```
+
+#### **2. Extending Search Functionality**
+
+```python
+# Modify app/services/search.py
+class SearchService:
+    def new_search_method(self, query, filters):
+        # Use existing patterns
+        retriever = clients.vector_store.as_retriever(
+            search_kwargs={"k": 50, "namespace": namespace}
+        )
+        results = retriever.invoke(query)
+        # Add your custom logic
+        return processed_results
+```
+
+#### **3. Adding New Image Processing**
+
+```python
+# Extend app/services/processor.py
+def _process_new_element_type(self, elements, base_url, source_url):
+    docs = []
+    for element in elements:
+        # Extract URLs
+        urls = self._extract_urls(element)
+
+        # Build context
+        context = extract_context(element)
+
+        # Create document
+        doc = Document(
+            page_content=f"Context: {context}",
+            metadata={
+                'img_url': url,
+                'source_url': source_url,
+                # Add your metadata
+            }
+        )
+        docs.append(doc)
+    return docs
+```
+
+### 📚 **Understanding the Data Flow**
+
+#### **Request → Response Journey**
+
+```python
+# 1. User starts crawl
+POST /crawl {"url": "example.com", "limit": 10}
+
+# 2. Session creation (app/api/crawl.py)
+session_manager.create_session(session_id, url, limit)
+
+# 3. Background processing (app/services/crawler.py)
+crawler.start_crawl(session)
+└── _perform_crawl(session)
+    ├── firecrawl_app.crawl_url()      # External API
+    ├── processor.process_crawl_results_directly()
+    └── _index_documents_in_batches()  # Pinecone upload
+
+# 4. Real-time updates (app/api/status.py)
+GET /crawl/{id}/status  # SSE stream of progress
+
+# 5. Search functionality (app/api/chat.py)
+POST /chat → search_service.search_images_with_dedup()
+```
+
+#### **Configuration Management**
+
+```python
+# Environment variables → app/config.py
+OPENAI_API_KEY → clients.openai_client
+PINECONE_API_KEY → clients.vector_store
+FIRECRAWL_API_KEY → clients.firecrawl_app
+
+# Lazy loading pattern
+class ClientManager:
+    @property
+    def openai_client(self):
+        if not self._openai_client:
+            self._openai_client = OpenAI(api_key=self.config.OPENAI_API_KEY)
+        return self._openai_client
+```
+
+### 🛠️ **Development Workflow**
+
+#### **1. Local Development Setup**
+
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Set up environment
+cp .env.example .env  # Add your API keys
+
+# Run in debug mode
+FLASK_DEBUG=true python server.py
+```
+
+#### **2. Testing New Features**
+
+```python
+# Test individual components
+from app.services.processor import HTMLProcessor
+processor = HTMLProcessor()
+docs = processor.process_html_content(html_string, base_url)
+
+# Test API endpoints
+curl -X POST http://localhost:5001/crawl \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com", "limit": 5}'
+```
+
+#### **3. Common Customizations**
+
+- **Add new image sources**: Extend `_process_img_tags()` in `processor.py`
+- **Modify search ranking**: Update sorting logic in `search.py`
+- **Add new API endpoints**: Create new blueprint in `app/api/`
+- **Change embedding model**: Update `ClientManager` in `config.py`
+
+### 🔧 **Extension Points**
+
+The modular architecture makes these extensions straightforward:
+
+1. **New Crawl Sources**: Add clients to `ClientManager`
+2. **Additional Image Formats**: Extend `get_image_format()`
+3. **Custom Search Filters**: Modify `search_images_with_dedup()`
+4. **Alternative Storage**: Replace `vector_store` in `ClientManager`
+5. **New API Versions**: Add versioned blueprints
+
 ## 🚨 Troubleshooting
 
 ### Common Issues
