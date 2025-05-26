@@ -80,7 +80,7 @@ app/
 │   └── search.py         # AI-powered search & deduplication
 ├── api/                  # RESTful API endpoints
 │   ├── __init__.py
-│   ├── crawl.py          # Crawling operations (/crawl, /sessions, /cleanup)
+│   ├── crawl.py          # Crawling operations (/crawl)
 │   ├── status.py         # Real-time status monitoring (SSE & polling)
 │   ├── chat.py           # Natural language image search
 │   └── health.py         # Health checks & monitoring
@@ -154,9 +154,6 @@ python app.py https://www.apple.com/iphone 20
 | `/crawl/{id}/status`        | GET    | Real-time SSE updates   | Event stream             |
 | `/crawl/{id}/status-simple` | GET    | Polling-based status    | JSON status              |
 | `/chat`                     | POST   | Natural language search | Search results           |
-| `/sessions`                 | GET    | List all sessions       | Session summaries        |
-| `/sessions/{id}`            | DELETE | Delete session          | Confirmation             |
-| `/cleanup`                  | POST   | Remove old sessions     | Cleanup stats            |
 | `/health`                   | GET    | Health check            | Service status           |
 
 ### Example Usage
@@ -701,9 +698,7 @@ app/services/search.py   # AI-powered search with deduplication
 
 ```bash
 app/api/crawl.py        # Crawling operations
-├── POST /crawl         # Start new crawl session
-├── GET /sessions       # List all sessions
-└── DELETE /sessions/{id} # Cleanup operations
+└── POST /crawl         # Start new crawl session
 
 app/api/status.py       # Real-time progress monitoring
 ├── GET /crawl/{id}/status        # Server-Sent Events stream

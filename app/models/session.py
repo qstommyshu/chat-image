@@ -106,25 +106,7 @@ class SessionManager:
         """Get a session by ID."""
         return self.crawl_sessions.get(session_id)
     
-    def delete_session(self, session_id: str) -> bool:
-        """
-        Delete a session and clean up associated resources.
-        
-        Args:
-            session_id: Session to delete
-            
-        Returns:
-            True if session was deleted, False if not found
-        """
-        if session_id not in self.crawl_sessions:
-            return False
-        
-        # Clean up namespace tracking
-        self.session_namespaces.pop(session_id, None)
-        
-        # Remove session
-        del self.crawl_sessions[session_id]
-        return True
+
     
     def set_namespace(self, session_id: str, namespace: str):
         """Set the Pinecone namespace for a session."""
@@ -136,29 +118,7 @@ class SessionManager:
     
 
     
-    def list_sessions(self) -> list:
-        """List all sessions with summary information."""
-        sessions = []
-        for session_id, session in self.crawl_sessions.items():
-            # Extract creation timestamp from first message if available
-            created_at = None
-            if not session.messages.empty():
-                try:
-                    created_at = session.messages.queue[0]['timestamp']
-                except (IndexError, KeyError):
-                    pass
-            
-            sessions.append({
-                "session_id": session_id,
-                "url": session.url,
-                "status": session.status,
-                "total_images": session.total_images,
-                "total_pages": session.total_pages,
-                "completed": session.completed,
-                "created_at": created_at
-            })
-        
-        return sessions
+
 
 
 # Global session manager instance
