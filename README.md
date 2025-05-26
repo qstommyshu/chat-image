@@ -84,9 +84,7 @@ app/
 │   ├── status.py         # Real-time status monitoring (SSE & polling)
 │   ├── chat.py           # Natural language image search
 │   └── health.py         # Health checks & monitoring
-└── utils/                # Shared utilities
-    ├── __init__.py
-    └── html_utils.py     # URL processing, format detection, context extraction
+
 
 server.py                 # Application entry point
 requirements.txt          # Python dependencies
@@ -718,10 +716,11 @@ app/api/chat.py         # Natural language image search
 #### **🔧 Utilities**
 
 ```bash
-app/utils/html_utils.py # HTML processing helpers
-├── fix_image_paths()   # Relative → absolute URL conversion
-├── get_image_format()  # Format detection from URLs
-└── extract_context()   # Rich context building for embeddings
+app/services/processor.py # HTML processing & document creation
+├── fix_image_paths()     # Relative → absolute URL conversion
+├── get_image_format()    # Format detection from URLs
+├── extract_context()     # Rich context building for embeddings
+└── HTMLProcessor class   # Complete HTML processing pipeline
 ```
 
 ### 🔍 **Key Code Patterns**
