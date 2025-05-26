@@ -80,8 +80,7 @@ Initiates an intelligent crawling operation that processes content directly in m
 #### Error Responses
 
 - `400 Bad Request`: Missing or invalid URL format
-- `409 Conflict`: Domain already being crawled
-- `429 Too Many Requests`: Maximum concurrent crawls reached
+- `429 Too Many Requests`: Maximum concurrent crawls reached (server-wide limit)
 
 #### Example
 
@@ -459,22 +458,19 @@ Check server health and get system status information.
 
 ### HTTP Status Codes
 
-| Code | Meaning             | Description                             |
-| ---- | ------------------- | --------------------------------------- |
-| 200  | Success             | Request completed successfully          |
-| 400  | Bad Request         | Invalid parameters or malformed request |
-| 404  | Not Found           | Session or resource not found           |
-| 409  | Conflict            | Domain already being crawled            |
-| 429  | Too Many Requests   | Concurrent crawl limit reached          |
-| 503  | Service Unavailable | SSE disabled, use polling endpoint      |
+| Code | Meaning             | Description                                |
+| ---- | ------------------- | ------------------------------------------ |
+| 200  | Success             | Request completed successfully             |
+| 400  | Bad Request         | Invalid parameters or malformed request    |
+| 404  | Not Found           | Session or resource not found              |
+| 429  | Too Many Requests   | Server-wide concurrent crawl limit reached |
+| 503  | Service Unavailable | SSE disabled, use polling endpoint         |
 
 ### Error Response Format
 
 ```json
 {
-  "error": "Domain example.com is already being crawled",
-  "existing_session": "another-session-id",
-  "message": "Please wait for the current crawl to complete or use the existing session"
+  "error": "Maximum 3 concurrent crawls allowed. Please try again later."
 }
 ```
 

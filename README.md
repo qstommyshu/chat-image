@@ -276,26 +276,373 @@ responsive_set = find_image_variants(base_image_url)
 
 ## 🔍 Under the Hood
 
-### Intelligent Image Processing
+### 🔄 Complete System Logic Flow
 
-- **Multi-Source Extraction**: Processes `<img>`, `<source>`, `<picture>`, and even `<video>` poster frames
-- **Context Aggregation**: Combines alt text, titles, captions, and surrounding content
-- **Smart Deduplication**: Uses filename similarity and semantic analysis to remove duplicates
-- **Format Intelligence**: Automatically detects and prioritizes modern web formats
+```
+1. 📥 CRAWL REQUEST
+   ├── User submits URL + limit
+   ├── System creates unique session + namespace
+   ├── Validates concurrency limits
+   └── Starts background crawling thread
 
-### Scalable Vector Search
+2. 🕷️ WEBSITE CRAWLING (Firecrawl)
+   ├── JavaScript rendering enabled
+   ├── 3-second wait for lazy loading
+   ├── Extracts raw HTML from all pages
+   └── Real-time progress updates via SSE
 
-- **Semantic Embeddings**: Uses OpenAI's text-embedding-ada-002 for deep understanding
-- **Namespace Isolation**: Each crawl session gets its own vector space
-- **Efficient Storage**: Only URLs and metadata stored, not binary image data
-- **Relevance Scoring**: Combines semantic similarity with metadata matching
+3. 🔄 DIRECT MEMORY PROCESSING
+   ├── Fix relative → absolute image URLs
+   ├── Extract img, source, picture, video tags
+   ├── Build rich context from alt text + surroundings
+   └── Create Document objects (no disk I/O)
 
-### Production-Ready Architecture
+4. 🧠 EMBEDDING GENERATION
+   ├── Document content: "Alt: iPhone camera | Title: Features | Context: ..."
+   ├── OpenAI text-embedding-ada-002 → 1536D vectors
+   ├── Batch processing (100 docs at a time)
+   └── Direct upload to Pinecone namespace
 
-- **Error Recovery**: Graceful handling of failed pages or network issues
-- **Resource Management**: Automatic cleanup of completed sessions
-- **Monitoring**: Health checks and detailed logging for production deployment
-- **Security**: Input validation and rate limiting built-in
+5. 🔍 SEARCH REQUEST
+   ├── AI parses user query → extract intent + format filters
+   ├── Generate query embedding (same OpenAI model)
+   ├── Two-layer search: Semantic + Keyword scoring
+   ├── Smart deduplication + format preference
+   └── Return ranked results with relevance scores
+```
+
+### 🚀 Crawling & Embedding Pipeline
+
+The system uses a **zero-disk-storage** approach for maximum efficiency:
+
+#### Phase 1: Website Crawling
+
+```python
+# Firecrawl configuration for optimal results
+crawl_result = firecrawl_app.crawl_url(
+    url,
+    limit=page_limit,
+    scrape_options={
+        "formats": ["rawHtml"],
+        "renderJs": True,           # Execute JavaScript
+        "waitFor": 3000,           # Wait for lazy loading
+        "includeTags": ["img", "source", "picture", "video"],
+        "removeBase64Images": False  # Keep embedded images
+    }
+)
+```
+
+#### Phase 2: Direct HTML Processing
+
+```python
+# No temporary files - pure memory processing
+for page_data in crawl_result.data:
+    # Fix relative paths to absolute URLs
+    fixed_html = fix_image_paths(page_data.rawHtml, page_url)
+
+    # Extract all image elements
+    soup = BeautifulSoup(fixed_html, 'html.parser')
+    images = soup.find_all(['img', 'source'])
+
+    # Build rich document content
+    for img in images:
+        context = extract_context(img)  # Alt + title + surrounding text
+        doc = Document(
+            page_content=f"Alt: {alt} | Title: {title} | Context: {context}",
+            metadata={
+                'img_url': absolute_url,
+                'img_format': detect_format(url),
+                'alt_text': alt_text,
+                'source_url': page_url,
+                'session_id': session_id
+            }
+        )
+```
+
+#### Phase 3: Embedding & Vector Storage
+
+```python
+# Batch embedding generation for efficiency
+for batch in chunks(all_documents, batch_size=100):
+    # OpenAI automatically generates embeddings for page_content
+    vector_store.add_documents(
+        batch,
+        namespace=f"session_{session_id[:8]}"
+    )
+
+    # Each document becomes:
+    # - 1536-dimensional vector (from page_content)
+    # - Metadata stored alongside (URLs, format, alt text)
+    # - Isolated in session-specific namespace
+```
+
+### 🎯 Two-Layer Search System
+
+The search combines **semantic understanding** with **keyword precision**:
+
+#### Layer 1: Semantic Vector Search
+
+```python
+# Query embedding generation
+user_query = "iPhone 15 Pro camera features"
+query_vector = openai_embeddings.embed_query(user_query)
+
+# Pinecone similarity search
+similar_docs = pinecone_index.query(
+    vector=query_vector,
+    top_k=50,
+    namespace=f"session_{session_id}",
+    include_metadata=True
+)
+
+# Returns documents with cosine similarity scores
+# Finds semantically related content even with different wording
+```
+
+#### Layer 2: Keyword Relevance Boosting
+
+```python
+def calculate_keyword_boost(doc, query):
+    alt_text = doc.metadata['alt_text'].lower()
+    title_text = doc.metadata['title'].lower()
+    query_lower = query.lower()
+
+    boost_score = 0
+
+    # Exact phrase matching (highest priority)
+    if query_lower in alt_text:
+        boost_score += 2.0
+    if query_lower in title_text:
+        boost_score += 1.0
+
+    # Individual word matching
+    for word in query.split():
+        if len(word) > 2:  # Skip short words
+            if word in alt_text:
+                boost_score += 0.5
+            if word in title_text:
+                boost_score += 0.3
+
+    return boost_score
+
+# Final ranking combines both layers
+final_score = semantic_similarity + keyword_boost_score
+```
+
+#### Smart Result Ranking
+
+```python
+# Multi-factor ranking algorithm
+results.sort(key=lambda x: (
+    -x['keyword_boost_score'],     # Exact matches first
+    x['format'] not in ['jpg', 'png'],  # Prefer common formats
+    x['format'] != 'jpg',          # JPG preferred over PNG
+    -x['semantic_score']           # Then semantic similarity
+))
+
+# Deduplication using normalized alt text
+# Format preference: JPG > PNG > WebP > SVG
+# Quality scoring based on context richness
+```
+
+### 🧠 Intelligent Image Processing
+
+#### Multi-Source Extraction
+
+```python
+# Comprehensive image discovery
+img_sources = [
+    soup.find_all('img'),                    # Standard images
+    soup.find_all('source'),                 # Responsive images
+    soup.find_all('picture'),                # Modern picture elements
+    soup.find_all('video', poster=True)      # Video poster frames
+]
+
+# Advanced attribute processing
+for img in images:
+    urls = extract_urls_from([
+        img.get('src'),
+        img.get('data-src'),                 # Lazy loading
+        img.get('data-lazy-src'),            # Alternative lazy loading
+        img.get('srcset'),                   # Responsive sets
+        img.get('data-srcset')               # Deferred responsive sets
+    ])
+```
+
+#### Context-Aware Document Creation
+
+```python
+def build_rich_context(img_element):
+    context_parts = []
+
+    # Direct attributes
+    if img_element.get('alt'):
+        context_parts.append(f"Alt: {img_element['alt'][:500]}")
+    if img_element.get('title'):
+        context_parts.append(f"Title: {img_element['title'][:200]}")
+
+    # CSS classes (design intent)
+    classes = ' '.join(img_element.get('class', []))
+    if classes:
+        context_parts.append(f"Class: {classes[:300]}")
+
+    # Surrounding content (page context)
+    parent = img_element.parent
+    if parent:
+        parent_text = parent.get_text(strip=True)[:150]
+        context_parts.append(f"Context: {parent_text}")
+
+    return " | ".join(context_parts)
+
+# Result: Rich semantic content for embedding
+# "Alt: iPhone 15 Pro camera system | Title: Camera Features | Class: hero-image product-photo | Context: Advanced photography with 48MP main camera"
+```
+
+### 🔒 Session Isolation & Concurrency
+
+#### Namespace Management
+
+```python
+# Each user gets isolated vector space
+namespace = f"session_{session_id[:8]}"  # e.g., "session_550e8400"
+
+# Benefits:
+# - No cross-contamination between users
+# - Parallel crawls of same domain allowed
+# - Easy cleanup when session ends
+# - Scalable multi-tenant architecture
+```
+
+#### Thread-Safe Operations
+
+```python
+class SessionManager:
+    def __init__(self):
+        self.crawl_sessions = {}
+        self.session_namespaces = {}
+        self.crawl_lock = threading.Lock()
+
+    def create_session(self, session_id, url, limit):
+        with self.crawl_lock:
+            # Concurrency controls
+            active_count = len([s for s in self.crawl_sessions.values()
+                              if s.status in ["crawling", "processing"]])
+
+            if active_count >= MAX_CONCURRENT_CRAWLS:
+                return None, "Server capacity reached"
+
+            # Session isolation
+            session = CrawlSession(session_id, url, limit)
+            self.crawl_sessions[session_id] = session
+            return session, None
+```
+
+### 📊 Performance Optimizations
+
+#### Batch Processing Strategy
+
+```python
+def index_documents_in_batches(documents, namespace):
+    batch_size = 100  # Optimal for Pinecone
+
+    for i in range(0, len(documents), batch_size):
+        batch = documents[i:i + batch_size]
+
+        try:
+            # Efficient bulk upload
+            vector_store.add_documents(batch, namespace=namespace)
+
+            # Progress tracking
+            progress = ((i + len(batch)) / len(documents)) * 100
+            session.add_message("progress", {
+                "message": f"Indexing: {progress:.1f}%",
+                "progress_percent": progress
+            })
+        except Exception as e:
+            # Continue on batch failure
+            log_error(f"Batch {i//batch_size + 1} failed: {e}")
+            continue
+```
+
+#### Memory-Efficient Pipeline
+
+```python
+# No intermediate file storage
+crawl_result = firecrawl.crawl_url(url)          # → Memory
+fixed_html = fix_image_paths(html_content)       # → Memory
+documents = process_html_content(fixed_html)     # → Memory
+vector_store.add_documents(documents)            # → Pinecone
+
+# Benefits:
+# - Faster processing (no disk I/O)
+# - Lower storage costs
+# - Better scalability
+# - Reduced complexity
+```
+
+### 🎛️ Production-Ready Architecture
+
+#### Error Recovery & Resilience
+
+```python
+try:
+    # Phase 1: Crawling
+    crawl_result = firecrawl_app.crawl_url(url, limit=limit)
+
+    # Phase 2: Processing
+    all_docs = processor.process_crawl_results_directly(crawl_result)
+
+    # Phase 3: Indexing
+    crawler._index_documents_in_batches(all_docs, namespace, session)
+
+except Exception as e:
+    session.status = "error"
+    session.error = str(e)
+    session.add_message("error", {
+        "status": "error",
+        "message": f"Crawling failed: {str(e)}"
+    })
+finally:
+    # Always clean up resources
+    cleanup_session_resources(session_id)
+```
+
+#### Real-Time Monitoring
+
+```python
+# Server-Sent Events with fallback
+@app.route('/crawl/<session_id>/status')
+def stream_status(session_id):
+    def generate():
+        session = session_manager.get_session(session_id)
+        timeout = time.time() + SSE_TIMEOUT_SECONDS
+
+        while time.time() < timeout:
+            if not session.messages.empty():
+                message = session.messages.get()
+                yield f"data: {json.dumps(message)}\n\n"
+
+                if message['type'] in ['completed', 'error']:
+                    break
+            else:
+                # Heartbeat to keep connection alive
+                yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
+                time.sleep(2)
+
+    return Response(generate(), mimetype='text/plain')
+
+# Polling fallback for platforms without SSE support
+@app.route('/crawl/<session_id>/status-simple')
+def poll_status(session_id):
+    session = session_manager.get_session(session_id)
+    return jsonify({
+        "session_id": session_id,
+        "status": session.status,
+        "completed": session.completed,
+        "total_images": session.total_images,
+        "messages": list(session.messages.queue)
+    })
+```
 
 ## 🚨 Troubleshooting
 
