@@ -70,7 +70,6 @@ class SessionManager:
         from app.config import Config
         self.crawl_sessions: Dict[str, CrawlSession] = {}
         self.session_namespaces: Dict[str, str] = {}  # Maps session_id to Pinecone namespace
-        self.active_crawls: Dict[str, str] = {}  # Maps domain -> session_id
         self.crawl_lock = threading.Lock()
         self.max_concurrent_crawls = max_concurrent_crawls or Config.MAX_CONCURRENT_CRAWLS
         
@@ -82,7 +81,7 @@ class SessionManager:
             session_id: Unique session identifier
             url: URL to crawl
             limit: Maximum pages to crawl
-            domain: Domain being crawled
+            domain: Domain being crawled (kept for backwards compatibility but not used for restrictions)
             
         Returns:
             Tuple of (session, error_message). Error message is None if successful.
@@ -97,14 +96,9 @@ class SessionManager:
             if active_count >= self.max_concurrent_crawls:
                 return None, f"Maximum {self.max_concurrent_crawls} concurrent crawls allowed. Please try again later."
             
-            # Check domain conflicts
-            if domain in self.active_crawls:
-                return None, f"Domain {domain} is already being crawled"
-            
-            # Create session
+            # Create session - each user gets their own isolated session and namespace
             session = CrawlSession(session_id, url, limit)
             self.crawl_sessions[session_id] = session
-            self.active_crawls[domain] = session_id
             
             return session, None
     
@@ -125,18 +119,6 @@ class SessionManager:
         if session_id not in self.crawl_sessions:
             return False
         
-        session = self.crawl_sessions[session_id]
-        
-        # Clean up domain tracking
-        try:
-            from urllib.parse import urlparse
-            parsed_url = urlparse(session.url)
-            domain = parsed_url.netloc.replace('www.', '')
-            with self.crawl_lock:
-                self.active_crawls.pop(domain, None)
-        except:
-            pass  # Ignore cleanup errors
-        
         # Clean up namespace tracking
         self.session_namespaces.pop(session_id, None)
         
@@ -152,10 +134,7 @@ class SessionManager:
         """Get the Pinecone namespace for a session."""
         return self.session_namespaces.get(session_id)
     
-    def cleanup_domain_tracking(self, domain: str):
-        """Clean up domain tracking (called when crawl completes)."""
-        with self.crawl_lock:
-            self.active_crawls.pop(domain, None)
+
     
     def list_sessions(self) -> list:
         """List all sessions with summary information."""

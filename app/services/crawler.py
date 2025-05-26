@@ -39,9 +39,11 @@ class CrawlerService:
         This function handles the entire crawl lifecycle:
         1. Website crawling using Firecrawl
         2. Direct HTML processing and image extraction (no disk storage)
-        3. Vector database indexing for search
+        3. Vector database indexing for search with session isolation
         4. Status updates via SSE
-        5. Cleanup of domain tracking
+        
+        Each session gets its own isolated namespace, allowing multiple users
+        to crawl the same domain simultaneously without conflicts.
         
         Args:
             session: The CrawlSession to process
@@ -160,9 +162,8 @@ class CrawlerService:
                 "message": f"Crawling failed: {str(e)}"
             })
         finally:
-            # Always clean up domain tracking to allow future crawls of same domain
-            if domain:
-                session_manager.cleanup_domain_tracking(domain)
+            # Cleanup complete - session isolation means no domain tracking needed
+            pass
     
     def _index_documents_in_batches(self, all_docs: list, namespace: str, session: CrawlSession) -> None:
         """Index documents in Pinecone in batches to avoid size limits."""

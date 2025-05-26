@@ -26,7 +26,8 @@ def start_crawl():
     
     This endpoint initiates a background crawling operation that processes
     content directly in memory without disk storage, then indexes images
-    in Pinecone for semantic search.
+    in Pinecone for semantic search. Each user gets their own isolated 
+    session and data namespace.
     
     Request Body:
         url (str): The URL to start crawling from
@@ -37,8 +38,7 @@ def start_crawl():
         
     Error Codes:
         400: Missing or invalid URL
-        409: Domain already being crawled  
-        429: Too many concurrent crawls
+        429: Too many concurrent crawls (server-wide limit)
     """
     data = request.json
     url = data.get('url')
@@ -60,14 +60,7 @@ def start_crawl():
     session, error_message = session_manager.create_session(session_id, url, limit, domain)
     
     if error_message:
-        if "concurrent crawls" in error_message:
-            return jsonify({"error": error_message}), 429
-        else:
-            return jsonify({
-                "error": error_message,
-                "existing_session": session_manager.active_crawls.get(domain),
-                "message": "Please wait for the current crawl to complete or use the existing session"
-            }), 409
+        return jsonify({"error": error_message}), 429
     
     # Start crawling in background thread
     crawler_service.start_crawl(session)
