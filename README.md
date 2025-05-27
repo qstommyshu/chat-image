@@ -159,61 +159,6 @@ Searching "iPhone camera" (repeated query):
 - **Context-Aware Extraction**: Captures alt text, titles, and surrounding content for better search relevance
 - **Format-Aware Processing**: Prioritizes high-quality formats (JPG, PNG) while supporting all web formats
 
-## 🚀 Advanced Use Cases
-
-### Dynamic Website Construction
-
-```python
-# Example: Building a personalized product catalog
-search_results = search_service.search_images_with_dedup(
-    "modern minimalist furniture living room",
-    namespace="furniture_site",
-    format_filter=["jpg", "png"],
-    max_results=20
-)
-
-# Use results to dynamically populate website sections
-hero_images = [img for img in search_results if "hero" in img['context']]
-product_grid = [img for img in search_results if img['alt_match_score'] > 1.0]
-```
-
-### Competitive Analysis & Research
-
-- **Multi-Domain Crawling**: Compare image strategies across competitor websites
-- **Trend Analysis**: Identify popular visual themes and design patterns
-- **Content Auditing**: Find missing alt text, outdated images, or format inconsistencies
-
-### Content Management & SEO
-
-- **Image Inventory**: Catalog all images across large websites
-- **Alt Text Optimization**: Identify images lacking proper accessibility descriptions
-- **Format Optimization**: Find opportunities to convert to modern formats (WebP, AVIF)
-
-## 🔧 Recent Improvements & Cleanup
-
-### Cache System Cleanup ✅
-
-The caching system has been cleaned up to provide **honest, straightforward reporting**:
-
-- ❌ **Removed**: Hard-coded performance gain calculations and fabricated speed claims
-- ✅ **Added**: Real response times in milliseconds and genuine cache age information
-- ✅ **Simplified**: Cache hit messages now show actual cache status without fake percentages
-- ✅ **Improved**: Clean logging with actual metrics instead of manufactured performance data
-
-**Before**: `🚀 Cache hit! Results loaded 92% faster (2h 15m old) - saved 92% of processing time`
-**After**: `🚀 Cache hit! Results loaded instantly (2h 15m old)`
-
-### API Cleanup ✅
-
-Removed unused endpoints and simplified the status monitoring system:
-
-- ❌ **Removed**: `/crawl/{id}/status-simple` polling endpoint (dead code)
-- ❌ **Removed**: Fallback logic that pointed to unused polling endpoint
-- ✅ **Simplified**: Clean SSE-only status monitoring
-- ✅ **Streamlined**: Crawl API response only includes endpoints actually used by clients
-
-The system now provides **clean, maintainable code** with honest performance reporting and no dead endpoints.
-
 ## 🏗️ Project Architecture
 
 ```
@@ -338,66 +283,7 @@ graph TB
     class FIRECRAWL,OPENAI,PINECONE,REDIS externalLayer
 ```
 
-### 🔄 Data Flow Architecture
-
-```mermaid
-sequenceDiagram
-    participant User
-    participant API
-    participant Cache
-    participant Crawler
-    participant Firecrawl
-    participant Processor
-    participant Pinecone
-    participant Search
-    participant OpenAI
-
-    %% Crawling Flow
-    Note over User,OpenAI: 🕷️ Website Crawling Flow
-    User->>API: POST /crawl {url, limit}
-    API->>Cache: Check HTML cache
-
-    alt Cache Miss
-        API->>Crawler: Start crawl session
-        Crawler->>Firecrawl: Crawl website (JS rendering)
-        Firecrawl-->>Crawler: Raw HTML pages
-        Crawler->>Cache: Store HTML cache
-        Crawler->>Processor: Extract images & context
-        Processor->>OpenAI: Generate embeddings (batch)
-        OpenAI-->>Processor: 1536D vectors
-        Processor->>Cache: Store embedding cache
-        Processor->>Pinecone: Store vectors + metadata
-    else Cache Hit
-        Cache-->>API: Return cached HTML
-        API->>Processor: Process cached content
-    end
-
-    Crawler-->>API: Progress updates (SSE)
-    API-->>User: Real-time status stream
-
-    %% Search Flow
-    Note over User,OpenAI: 🔍 Image Search Flow
-    User->>API: POST /chat {query, session_id}
-    API->>Cache: Check query cache
-
-    alt Cache Miss
-        API->>Search: Process search query
-        Search->>OpenAI: Parse query intent
-        Search->>OpenAI: Generate query embedding
-        Search->>Cache: Store query & embedding cache
-        Search->>Pinecone: Vector similarity search
-        Pinecone-->>Search: Similar vectors + metadata
-        Search->>Search: Two-layer scoring + deduplication
-        Search-->>API: Ranked, deduplicated results
-        API->>Cache: Store final results
-    else Cache Hit
-        Cache-->>API: Return cached results
-    end
-
-    API-->>User: Image search results
-```
-
-### 🧩 Service Integration Details
+### 🧩 Search Processing Flow & Caching Strategy
 
 ```mermaid
 graph LR
@@ -418,21 +304,17 @@ graph LR
         end
     end
 
-    subgraph "🎯 Two-Layer Scoring System"
+    subgraph "🎯 Search Processing Pipeline"
+        ALT_NORM["📝 Alt Text Normalization"]
         SEMANTIC["🧠 Semantic Similarity<br/>Vector cosine distance"]
         KEYWORD["🔤 Keyword Relevance<br/>Alt-text matching"]
-        FINAL["🎯 Final Score<br/>semantic + keyword_boost"]
-
-        SEMANTIC --> FINAL
-        KEYWORD --> FINAL
-    end
-
-    subgraph "🧹 Deduplication Engine"
-        ALT_NORM["📝 Alt Text Normalization"]
-        SIM_CHECK["📊 Similarity Threshold (0.8)"]
+        ALT_FILTER["🧹 Alt Text Filtering"]
         UNIQUE["✨ Unique Results Only"]
 
-        ALT_NORM --> SIM_CHECK --> UNIQUE
+        ALT_NORM --> SEMANTIC
+        SEMANTIC --> KEYWORD
+        KEYWORD --> ALT_FILTER
+        ALT_FILTER --> UNIQUE
     end
 ```
 
