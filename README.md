@@ -243,6 +243,199 @@ requirements.txt          # Python dependencies
 .env                      # Environment configuration (create this)
 ```
 
+### 🏗️ High-Level Architecture
+
+```mermaid
+graph TB
+    %% User Interface Layer
+    subgraph "🌐 User Interface"
+        UI[Web UI/Client]
+        CLI[Command Line]
+        API_USER[External API Users]
+    end
+
+    %% API Gateway Layer
+    subgraph "🚪 API Gateway (Flask)"
+        CRAWL_API["/crawl<br/>📤 POST"]
+        STATUS_API["/crawl/{id}/status<br/>📡 SSE Stream"]
+        CHAT_API["/chat<br/>🔍 POST"]
+        HEALTH_API["/health<br/>💚 GET"]
+    end
+
+    %% Core Services Layer
+    subgraph "⚙️ Core Services"
+        subgraph "🕷️ Crawler Service"
+            CRAWLER[CrawlerService]
+            PROCESSOR[HTMLProcessor]
+            SESSION_MGR[SessionManager]
+        end
+
+        subgraph "🔍 Search Service"
+            SEARCH[SearchService]
+            DEDUP[Deduplication Engine]
+            SCORER[Two-Layer Scoring]
+        end
+
+        subgraph "⚡ Cache Service"
+            CACHE[CacheService]
+            METRICS[CacheMetrics]
+        end
+    end
+
+    %% External Services Layer
+    subgraph "🌍 External Services"
+        FIRECRAWL[🕷️ Firecrawl API<br/>JavaScript Rendering]
+        OPENAI[🧠 OpenAI API<br/>Embeddings & LLM]
+        PINECONE[📊 Pinecone<br/>Vector Database]
+        REDIS[⚡ Redis Cloud<br/>Multi-Layer Cache]
+    end
+
+    %% Data Flow - User Requests
+    UI --> CRAWL_API
+    UI --> STATUS_API
+    UI --> CHAT_API
+    CLI --> CRAWLER
+    API_USER --> CRAWL_API
+    API_USER --> CHAT_API
+
+    %% Data Flow - API to Services
+    CRAWL_API --> CRAWLER
+    STATUS_API --> SESSION_MGR
+    CHAT_API --> SEARCH
+    HEALTH_API --> CACHE
+
+    %% Data Flow - Core Services
+    CRAWLER --> CACHE
+    CRAWLER --> PROCESSOR
+    SEARCH --> CACHE
+    SEARCH --> DEDUP
+    SEARCH --> SCORER
+    SESSION_MGR -.-> CRAWLER
+
+    %% Data Flow - External Services
+    CRAWLER --> FIRECRAWL
+    PROCESSOR --> PINECONE
+    SEARCH --> OPENAI
+    SEARCH --> PINECONE
+    CACHE --> REDIS
+
+    %% Cache Optimization Flows
+    CACHE -.->|HTML Cache| FIRECRAWL
+    CACHE -.->|Query Cache| OPENAI
+    CACHE -.->|Embedding Cache| OPENAI
+
+    %% Styling
+    classDef userLayer fill:#e1f5fe,stroke:#01579b,stroke-width:2px,color:#000
+    classDef apiLayer fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#000
+    classDef serviceLayer fill:#e8f5e8,stroke:#1b5e20,stroke-width:2px,color:#000
+    classDef externalLayer fill:#fff3e0,stroke:#e65100,stroke-width:2px,color:#000
+    classDef cacheLayer fill:#ffebee,stroke:#b71c1c,stroke-width:2px,color:#000
+
+    class UI,CLI,API_USER userLayer
+    class CRAWL_API,STATUS_API,CHAT_API,HEALTH_API apiLayer
+    class CRAWLER,PROCESSOR,SESSION_MGR,SEARCH,DEDUP,SCORER serviceLayer
+    class CACHE,METRICS cacheLayer
+    class FIRECRAWL,OPENAI,PINECONE,REDIS externalLayer
+```
+
+### 🔄 Data Flow Architecture
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant API
+    participant Cache
+    participant Crawler
+    participant Firecrawl
+    participant Processor
+    participant Pinecone
+    participant Search
+    participant OpenAI
+
+    %% Crawling Flow
+    Note over User,OpenAI: 🕷️ Website Crawling Flow
+    User->>API: POST /crawl {url, limit}
+    API->>Cache: Check HTML cache
+
+    alt Cache Miss
+        API->>Crawler: Start crawl session
+        Crawler->>Firecrawl: Crawl website (JS rendering)
+        Firecrawl-->>Crawler: Raw HTML pages
+        Crawler->>Cache: Store HTML cache
+        Crawler->>Processor: Extract images & context
+        Processor->>OpenAI: Generate embeddings (batch)
+        OpenAI-->>Processor: 1536D vectors
+        Processor->>Cache: Store embedding cache
+        Processor->>Pinecone: Store vectors + metadata
+    else Cache Hit
+        Cache-->>API: Return cached HTML
+        API->>Processor: Process cached content
+    end
+
+    Crawler-->>API: Progress updates (SSE)
+    API-->>User: Real-time status stream
+
+    %% Search Flow
+    Note over User,OpenAI: 🔍 Image Search Flow
+    User->>API: POST /chat {query, session_id}
+    API->>Cache: Check query cache
+
+    alt Cache Miss
+        API->>Search: Process search query
+        Search->>OpenAI: Parse query intent
+        Search->>OpenAI: Generate query embedding
+        Search->>Cache: Store query & embedding cache
+        Search->>Pinecone: Vector similarity search
+        Pinecone-->>Search: Similar vectors + metadata
+        Search->>Search: Two-layer scoring + deduplication
+        Search-->>API: Ranked, deduplicated results
+        API->>Cache: Store final results
+    else Cache Hit
+        Cache-->>API: Return cached results
+    end
+
+    API-->>User: Image search results
+```
+
+### 🧩 Service Integration Details
+
+```mermaid
+graph LR
+    subgraph "🔄 Three-Layer Caching Strategy"
+        subgraph "Layer 1: HTML Cache"
+            HTML_KEY["🗂️ html:{url_hash}:{limit}:{date}"]
+            HTML_TTL["⏰ TTL: 7d static / 24h dynamic"]
+        end
+
+        subgraph "Layer 2: Query Cache"
+            QUERY_KEY["🗂️ query:{query_hash}:{namespace}"]
+            QUERY_TTL["⏰ TTL: 6h popular / 1h standard"]
+        end
+
+        subgraph "Layer 3: Embedding Cache"
+            EMB_KEY["🗂️ embedding:{text_hash}:{model}"]
+            EMB_TTL["⏰ TTL: 30 days"]
+        end
+    end
+
+    subgraph "🎯 Two-Layer Scoring System"
+        SEMANTIC["🧠 Semantic Similarity<br/>Vector cosine distance"]
+        KEYWORD["🔤 Keyword Relevance<br/>Alt-text matching"]
+        FINAL["🎯 Final Score<br/>semantic + keyword_boost"]
+
+        SEMANTIC --> FINAL
+        KEYWORD --> FINAL
+    end
+
+    subgraph "🧹 Deduplication Engine"
+        ALT_NORM["📝 Alt Text Normalization"]
+        SIM_CHECK["📊 Similarity Threshold (0.8)"]
+        UNIQUE["✨ Unique Results Only"]
+
+        ALT_NORM --> SIM_CHECK --> UNIQUE
+    end
+```
+
 ## 📋 Prerequisites
 
 1. **Python 3.8+**
