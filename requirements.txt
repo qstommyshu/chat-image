@@ -11,3 +11,7 @@ flask
 flask-cors
 sseclient-py
 gunicorn
+pytest
+pytest-mock
+pytest-asyncio
+pytest-cov
