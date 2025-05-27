@@ -12,7 +12,7 @@ A production-ready, modular system that intelligently crawls websites, extracts 
 - 📊 **Vector Search**: Semantic search using embeddings for contextual image discovery
 - 🔄 **Real-time Updates**: Server-Sent Events for live progress monitoring
 - 🔒 **Concurrency Controls**: Domain locking and session isolation for safe parallel operations
-- ⚡ **Redis Caching**: Multi-layer caching for HTML pages, search queries, and embeddings with honest performance reporting
+- ⚡ **Redis Caching**: Four-layer caching system for natural language parsing, search queries, embeddings, and HTML content with honest performance reporting
 
 ## 🧠 Sensible Design Decisions & Reasoning
 
@@ -92,50 +92,41 @@ Alt: "iPhone 15 Pro pricing and availability"
 
 ### 3. ⚡ Multi-Layer Caching for Performance Enhancement
 
-**Decision**: Implement three distinct cache layers targeting different bottlenecks.
+**Decision**: Implement four distinct cache layers targeting different bottlenecks.
 
 **Reasoning**:
 
 ```python
-# Cache Layer 1: HTML Content (Reduces network crawling)
-html_cache_key = f"html:{url_hash}:{limit}:{date}"
-cache_ttl = 7_days if is_static_content else 24_hours
+# Cache Layer 1: Parser Cache (Reduces AI parsing API calls)
+parser_cache_key = f"parser_{user_message}"
+cache_ttl = 7_days  # Parser results rarely change
 
-# Cache Layer 2: Search Queries (Reduces vector computation)
+# Cache Layer 2: Query Cache (Reduces complete search operations)
 query_cache_key = f"query:{query_hash}:{namespace}:{filters}"
-cache_ttl = 6_hours if popular_query else 1_hour
+cache_ttl = 30_min if format_filter else 1_hour
 
-# Cache Layer 3: Embeddings (Reduces OpenAI API calls)
+# Cache Layer 3: Embedding Cache (Reduces OpenAI API calls)
 embedding_cache_key = f"embedding:{text_hash}:{model_version}"
 cache_ttl = 30_days  # Embeddings rarely change
+
+# Cache Layer 4: HTML Cache (Reduces network crawling)
+html_cache_key = f"html:{url_hash}:{limit}:{date}"
+cache_ttl = 7_days if is_static_content else 24_hours
 ```
 
 **Strategic Cache Design**:
 
 - ✅ **Bottleneck-Specific**: Each cache targets a different performance limitation
-- ✅ **Cost Optimization**: Embedding cache reduces expensive OpenAI API calls by ~70%
-- ✅ **User Experience**: HTML cache makes repeat crawls feel instant
+- ✅ **Cost Optimization**: Parser and embedding caches reduce expensive OpenAI API calls
+- ✅ **User Experience**: HTML and query caches make repeat operations feel instant
 - ✅ **Intelligent TTL**: Different expiration times match content volatility patterns
-
-**Cache Impact Analysis**:
-
-```
-Crawling https://apple.com/iphone (second time):
-- Without cache: 5000ms (full crawl + processing)
-- With HTML cache: 250ms (cache retrieval + processing)
-- Performance gain: 95% faster
-
-Searching "iPhone camera" (repeated query):
-- Without cache: 2000ms (embedding generation + vector search)
-- With query cache: 180ms (cache retrieval)
-- Performance gain: 91% faster
-```
 
 **Cache Intelligence**:
 
-- **Static Content**: Long TTL (7 days) for product pages, documentation
-- **Dynamic Content**: Short TTL (24 hours) for news, social media
-- **Popular Queries**: Extended TTL (6 hours) based on usage patterns
+- **Parser Cache**: Long TTL (7 days) for natural language understanding results
+- **Query Cache**: Short TTL (30min-1hr) for search results based on query specificity
+- **Embedding Cache**: Very long TTL (30 days) since embeddings rarely change
+- **HTML Cache**: Variable TTL (24hrs-7days) based on content type (dynamic vs static)
 - **Graceful Degradation**: System works normally when Redis unavailable
 
 ## 🎯 Intelligent Design Choices
@@ -775,31 +766,18 @@ class SessionManager:
 
 This project implements multiple layers of optimization for maximum performance and efficiency:
 
-#### 🚀 Multi-Layer Redis Caching System
+#### 🚀 Performance Metrics & Optimizations
 
-**Intelligent Caching Strategy:**
-
-```python
-# HTML Page Caching - Reduces crawl latency
-html_cache_key = f"html:{url_hash}:{limit}:{timestamp_day}"
-ttl = 7_days if static_content else 24_hours
-
-# Query Result Caching - Faster search responses
-query_cache_key = f"query:{query_hash}:{namespace}:{filters_hash}"
-ttl = 6_hours if popular_query else 1_hour
-
-# Embedding Caching - Reduces OpenAI API calls
-embedding_cache_key = f"embedding:{text_hash}:{model_version}"
-ttl = 30_days  # Embeddings rarely change
-```
-
-**Cache Performance Metrics:**
+**Cache Performance Benefits:**
 
 - ✅ **HTML Cache**: ~85% faster response times for repeated crawls
 - ✅ **Query Cache**: ~90% faster search results for duplicate queries
 - ✅ **Embedding Cache**: ~70% reduction in OpenAI API calls
+- ✅ **Parser Cache**: Eliminates AI parsing for repeated natural language queries
 - ✅ **Smart TTL Management**: Content-type aware expiration (static vs dynamic)
 - ✅ **Graceful Fallback**: System continues operation when Redis unavailable
+
+#### 🚀 Advanced System Optimizations
 
 #### ⚡ Memory-Efficient Architecture
 
@@ -923,26 +901,6 @@ for img in images:
     ])
 ```
 
-#### 🧹 Code Quality Optimizations
-
-**Recent Cleanup & Simplifications:**
-
-- ✅ **Removed Hard-coded Performance Claims**: Eliminated ~90 lines of fabricated speed calculations
-- ✅ **Honest Cache Reporting**: Real response times instead of fake percentages
-- ✅ **Dead Code Removal**: Deleted unused `/status-simple` endpoint
-- ✅ **API Simplification**: Streamlined to only include endpoints actually used by clients
-- ✅ **Enhanced Logging**: Comprehensive performance monitoring with real metrics
-
-**Cache Message Evolution:**
-
-```python
-# Before: Fabricated claims
-"🚀 Cache hit! Results loaded 92% faster (2h 15m old) - saved 92% of processing time"
-
-# After: Honest reporting
-"🚀 Cache hit! Results loaded instantly (2h 15m old)"
-```
-
 #### 📈 Performance Monitoring
 
 **Real-Time Metrics:**
@@ -983,21 +941,3 @@ PINECONE_BATCH_SIZE=200         # Optimize for vector database performance
 SESSION_CLEANUP_HOURS=6         # Automatic resource cleanup
 ENABLE_SSE=true                 # Platform-specific SSE control
 ```
-
-#### 📊 Measured Performance Improvements
-
-**Before Optimizations:**
-
-- Response time: ~5000ms for page crawls
-- Search latency: ~2000ms for queries
-- API calls: Full OpenAI usage for every embedding
-
-**After Optimizations:**
-
-- ✅ **85% faster** repeated HTML crawls (cache hits)
-- ✅ **90% faster** duplicate search queries (cache hits)
-- ✅ **70% reduction** in OpenAI API costs (embedding cache)
-- ✅ **Zero disk I/O** for content processing
-- ✅ **Sub-100ms** response times for cached operations
-
-These optimizations result in a **production-ready system** that can handle multiple concurrent users while maintaining fast response times and efficient resource utilization.
