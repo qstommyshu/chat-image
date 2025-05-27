@@ -351,28 +351,11 @@ OPENAI_API_KEY=your_openai_api_key_here
 FIRECRAWL_API_KEY=your_firecrawl_api_key_here
 PINECONE_API_KEY=your_pinecone_api_key_here
 
-# Optional Configuration
-ENABLE_SSE=true                    # Enable Server-Sent Events (disable for Replit/Heroku)
-SSE_TIMEOUT_SECONDS=300           # SSE connection timeout
-MAX_CONCURRENT_CRAWLS=3           # Maximum simultaneous crawl operations
-FLASK_DEBUG=false                 # Debug mode (set to false for production)
-PORT=5001                         # Server port
-```
+# Keep Redis enabled
+REDIS_ENABLED=true
 
-### 3. Launch Options
-
-#### Option A: Flask Server (Recommended)
-
-```bash
-python server.py
-```
-
-Then open `client_example.html` in your browser or use the REST API.
-
-#### Option B: Command Line Interface
-
-```bash
-python app.py https://www.apple.com/iphone 20
+REDIS_CLOUD_URL=your_redis_cloud_url_here
+REDIS_PASSWORD=your_redis_password_here
 ```
 
 ## 🔌 API Documentation
@@ -386,45 +369,6 @@ python app.py https://www.apple.com/iphone 20
 | `/chat`              | POST   | Natural language search | Search results           |
 | `/health`            | GET    | Health check            | Service status           |
 
-### Example Usage
-
-#### 1. Start Crawling
-
-```bash
-curl -X POST http://localhost:5001/crawl \
-  -H "Content-Type: application/json" \
-  -d '{
-    "url": "https://www.apple.com/iphone",
-    "limit": 15
-  }'
-```
-
-#### 2. Monitor Progress (SSE)
-
-```javascript
-const eventSource = new EventSource(`/crawl/${sessionId}/status`);
-eventSource.onmessage = (event) => {
-  const data = JSON.parse(event.data);
-  console.log("Progress:", data);
-};
-```
-
-#### 3. Search Images
-
-```bash
-curl -X POST http://localhost:5001/chat \
-  -H "Content-Type: application/json" \
-  -d '{
-    "session_id": "your-session-id",
-    "chat_history": [
-      {
-        "role": "human",
-        "content": "Show me high-quality iPhone camera images in JPG format"
-      }
-    ]
-  }'
-```
-
 ## 🎨 Search Examples
 
 The AI understands natural language and can extract intent, format preferences, and context:
@@ -436,68 +380,6 @@ The AI understands natural language and can extract intent, format preferences, 
 "Camera feature screenshots in dark mode"    → Contextual search
 "Product photos without people"               → Advanced filtering
 ```
-
-## 🔧 Advanced Configuration
-
-### Performance Tuning
-
-```env
-# Crawler settings
-MAX_CONCURRENT_CRAWLS=5           # Increase for powerful servers
-FIRECRAWL_WAIT_TIME=5000         # Wait longer for slow sites
-
-# Vector database settings
-PINECONE_BATCH_SIZE=200          # Larger batches for faster indexing
-PINECONE_DIMENSION=1536          # OpenAI embedding dimension
-
-# Memory management
-SESSION_CLEANUP_HOURS=6          # Automatic session cleanup interval
-```
-
-### Deployment Options
-
-- **Development**: `FLASK_DEBUG=true` for hot reloading
-- **Production**: `ENABLE_SSE=false` for platforms that don't support SSE
-- **High Traffic**: Increase `MAX_CONCURRENT_CRAWLS` based on server capacity
-
-## 🌟 Unique Capabilities
-
-### 1. Contextual Understanding
-
-The system doesn't just find images—it understands context:
-
-```python
-# Finds images specifically used as hero banners
-"large banner images on homepage"
-
-# Identifies product vs. lifestyle photography
-"product shots without lifestyle context"
-
-# Understands technical requirements
-"high-resolution images suitable for print"
-```
-
-### 2. Dynamic Website Generation
-
-Use crawled data to build personalized experiences:
-
-```python
-# Auto-generate gallery pages
-gallery_images = search_by_theme("minimalist design")
-
-# Create contextual image recommendations
-related_images = search_by_similarity(current_image_context)
-
-# Build responsive image sets
-responsive_set = find_image_variants(base_image_url)
-```
-
-### 3. Content Strategy Insights
-
-- **Visual Trend Analysis**: Identify popular design patterns
-- **Competitor Benchmarking**: Compare image strategies
-- **SEO Optimization**: Find images lacking proper alt text
-- **Performance Auditing**: Identify oversized or poorly formatted images
 
 ## 🔍 Under the Hood
 
@@ -931,13 +813,3 @@ class CacheMetrics:
 - ✅ **Environment Adaptation**: Automatic detection of platform limitations (Replit, Heroku)
 - ✅ **Resource Management**: Automatic session cleanup and memory management
 - ✅ **Error Recovery**: Graceful degradation when external services unavailable
-
-**Configuration Flexibility:**
-
-```env
-# Performance tuning variables
-MAX_CONCURRENT_CRAWLS=5          # Scale based on server capacity
-PINECONE_BATCH_SIZE=200         # Optimize for vector database performance
-SESSION_CLEANUP_HOURS=6         # Automatic resource cleanup
-ENABLE_SSE=true                 # Platform-specific SSE control
-```
