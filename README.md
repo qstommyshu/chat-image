@@ -12,7 +12,7 @@ A production-ready, modular system that intelligently crawls websites, extracts 
 - 📊 **Vector Search**: Semantic search using embeddings for contextual image discovery
 - 🔄 **Real-time Updates**: Server-Sent Events for live progress monitoring
 - 🔒 **Concurrency Controls**: Domain locking and session isolation for safe parallel operations
-- ⚡ **Redis Caching**: Multi-layer caching for HTML pages, search queries, and embeddings with honest performance reporting
+- ⚡ **Redis Caching**: Four-layer caching system for natural language parsing, search queries, embeddings, and HTML content with honest performance reporting
 
 ## 🧠 Sensible Design Decisions & Reasoning
 
@@ -92,50 +92,41 @@ Alt: "iPhone 15 Pro pricing and availability"
 
 ### 3. ⚡ Multi-Layer Caching for Performance Enhancement
 
-**Decision**: Implement three distinct cache layers targeting different bottlenecks.
+**Decision**: Implement four distinct cache layers targeting different bottlenecks.
 
 **Reasoning**:
 
 ```python
-# Cache Layer 1: HTML Content (Reduces network crawling)
-html_cache_key = f"html:{url_hash}:{limit}:{date}"
-cache_ttl = 7_days if is_static_content else 24_hours
+# Cache Layer 1: Parser Cache (Reduces AI parsing API calls)
+parser_cache_key = f"parser_{user_message}"
+cache_ttl = 7_days  # Parser results rarely change
 
-# Cache Layer 2: Search Queries (Reduces vector computation)
+# Cache Layer 2: Query Cache (Reduces complete search operations)
 query_cache_key = f"query:{query_hash}:{namespace}:{filters}"
-cache_ttl = 6_hours if popular_query else 1_hour
+cache_ttl = 30_min if format_filter else 1_hour
 
-# Cache Layer 3: Embeddings (Reduces OpenAI API calls)
+# Cache Layer 3: Embedding Cache (Reduces OpenAI API calls)
 embedding_cache_key = f"embedding:{text_hash}:{model_version}"
 cache_ttl = 30_days  # Embeddings rarely change
+
+# Cache Layer 4: HTML Cache (Reduces network crawling)
+html_cache_key = f"html:{url_hash}:{limit}:{date}"
+cache_ttl = 7_days if is_static_content else 24_hours
 ```
 
 **Strategic Cache Design**:
 
 - ✅ **Bottleneck-Specific**: Each cache targets a different performance limitation
-- ✅ **Cost Optimization**: Embedding cache reduces expensive OpenAI API calls by ~70%
-- ✅ **User Experience**: HTML cache makes repeat crawls feel instant
+- ✅ **Cost Optimization**: Parser and embedding caches reduce expensive OpenAI API calls
+- ✅ **User Experience**: HTML and query caches make repeat operations feel instant
 - ✅ **Intelligent TTL**: Different expiration times match content volatility patterns
-
-**Cache Impact Analysis**:
-
-```
-Crawling https://apple.com/iphone (second time):
-- Without cache: 5000ms (full crawl + processing)
-- With HTML cache: 250ms (cache retrieval + processing)
-- Performance gain: 95% faster
-
-Searching "iPhone camera" (repeated query):
-- Without cache: 2000ms (embedding generation + vector search)
-- With query cache: 180ms (cache retrieval)
-- Performance gain: 91% faster
-```
 
 **Cache Intelligence**:
 
-- **Static Content**: Long TTL (7 days) for product pages, documentation
-- **Dynamic Content**: Short TTL (24 hours) for news, social media
-- **Popular Queries**: Extended TTL (6 hours) based on usage patterns
+- **Parser Cache**: Long TTL (7 days) for natural language understanding results
+- **Query Cache**: Short TTL (30min-1hr) for search results based on query specificity
+- **Embedding Cache**: Very long TTL (30 days) since embeddings rarely change
+- **HTML Cache**: Variable TTL (24hrs-7days) based on content type (dynamic vs static)
 - **Graceful Degradation**: System works normally when Redis unavailable
 
 ## 🎯 Intelligent Design Choices
@@ -287,20 +278,33 @@ graph TB
 
 ```mermaid
 graph LR
-    subgraph "🔄 Three-Layer Caching Strategy"
-        subgraph "Layer 1: HTML Cache"
-            HTML_KEY["🗂️ html:{url_hash}:{limit}:{date}"]
-            HTML_TTL["⏰ TTL: 7d static / 24h dynamic"]
+    subgraph "🔄 Four-Layer Caching Strategy"
+        subgraph "Layer 1: Parser Cache"
+            PARSER_KEY["🗂️ parser_{user_message}"]
+            PARSER_PURPOSE["🎯 Purpose: Cache AI-parsed query results<br/>to avoid re-parsing similar natural language requests"]
+            PARSER_TTL["⏰ TTL: 7 days"]
+            PARSER_STORAGE["💾 Stores: JSON query structure + timestamp"]
         end
 
         subgraph "Layer 2: Query Cache"
-            QUERY_KEY["🗂️ query:{query_hash}:{namespace}"]
-            QUERY_TTL["⏰ TTL: 6h popular / 1h standard"]
+            QUERY_KEY["🗂️ query:{query_hash}:{namespace}:{filters}"]
+            QUERY_PURPOSE["🎯 Purpose: Cache complete search results<br/>for exact query+namespace+filter combinations"]
+            QUERY_TTL["⏰ TTL: 30min (filtered) / 1h (standard)"]
+            QUERY_STORAGE["💾 Stores: Full search results + metadata"]
         end
 
         subgraph "Layer 3: Embedding Cache"
             EMB_KEY["🗂️ embedding:{text_hash}:{model}"]
+            EMB_PURPOSE["🎯 Purpose: Cache vector embeddings<br/>to avoid OpenAI API calls for repeated text"]
             EMB_TTL["⏰ TTL: 30 days"]
+            EMB_STORAGE["💾 Stores: 1536D vectors + creation timestamp"]
+        end
+
+        subgraph "Layer 4: HTML Cache"
+            HTML_KEY["🗂️ html:{url_hash}:{limit}:{date}"]
+            HTML_PURPOSE["🎯 Purpose: Cache crawled HTML content<br/>to avoid re-crawling same pages"]
+            HTML_TTL["⏰ TTL: 7d (static) / 24h (dynamic)"]
+            HTML_STORAGE["💾 Stores: Raw HTML + page metadata"]
         end
     end
 
@@ -347,28 +351,11 @@ OPENAI_API_KEY=your_openai_api_key_here
 FIRECRAWL_API_KEY=your_firecrawl_api_key_here
 PINECONE_API_KEY=your_pinecone_api_key_here
 
-# Optional Configuration
-ENABLE_SSE=true                    # Enable Server-Sent Events (disable for Replit/Heroku)
-SSE_TIMEOUT_SECONDS=300           # SSE connection timeout
-MAX_CONCURRENT_CRAWLS=3           # Maximum simultaneous crawl operations
-FLASK_DEBUG=false                 # Debug mode (set to false for production)
-PORT=5001                         # Server port
-```
+# Keep Redis enabled
+REDIS_ENABLED=true
 
-### 3. Launch Options
-
-#### Option A: Flask Server (Recommended)
-
-```bash
-python server.py
-```
-
-Then open `client_example.html` in your browser or use the REST API.
-
-#### Option B: Command Line Interface
-
-```bash
-python app.py https://www.apple.com/iphone 20
+REDIS_CLOUD_URL=your_redis_cloud_url_here
+REDIS_PASSWORD=your_redis_password_here
 ```
 
 ## 🔌 API Documentation
@@ -382,45 +369,6 @@ python app.py https://www.apple.com/iphone 20
 | `/chat`              | POST   | Natural language search | Search results           |
 | `/health`            | GET    | Health check            | Service status           |
 
-### Example Usage
-
-#### 1. Start Crawling
-
-```bash
-curl -X POST http://localhost:5001/crawl \
-  -H "Content-Type: application/json" \
-  -d '{
-    "url": "https://www.apple.com/iphone",
-    "limit": 15
-  }'
-```
-
-#### 2. Monitor Progress (SSE)
-
-```javascript
-const eventSource = new EventSource(`/crawl/${sessionId}/status`);
-eventSource.onmessage = (event) => {
-  const data = JSON.parse(event.data);
-  console.log("Progress:", data);
-};
-```
-
-#### 3. Search Images
-
-```bash
-curl -X POST http://localhost:5001/chat \
-  -H "Content-Type: application/json" \
-  -d '{
-    "session_id": "your-session-id",
-    "chat_history": [
-      {
-        "role": "human",
-        "content": "Show me high-quality iPhone camera images in JPG format"
-      }
-    ]
-  }'
-```
-
 ## 🎨 Search Examples
 
 The AI understands natural language and can extract intent, format preferences, and context:
@@ -432,68 +380,6 @@ The AI understands natural language and can extract intent, format preferences, 
 "Camera feature screenshots in dark mode"    → Contextual search
 "Product photos without people"               → Advanced filtering
 ```
-
-## 🔧 Advanced Configuration
-
-### Performance Tuning
-
-```env
-# Crawler settings
-MAX_CONCURRENT_CRAWLS=5           # Increase for powerful servers
-FIRECRAWL_WAIT_TIME=5000         # Wait longer for slow sites
-
-# Vector database settings
-PINECONE_BATCH_SIZE=200          # Larger batches for faster indexing
-PINECONE_DIMENSION=1536          # OpenAI embedding dimension
-
-# Memory management
-SESSION_CLEANUP_HOURS=6          # Automatic session cleanup interval
-```
-
-### Deployment Options
-
-- **Development**: `FLASK_DEBUG=true` for hot reloading
-- **Production**: `ENABLE_SSE=false` for platforms that don't support SSE
-- **High Traffic**: Increase `MAX_CONCURRENT_CRAWLS` based on server capacity
-
-## 🌟 Unique Capabilities
-
-### 1. Contextual Understanding
-
-The system doesn't just find images—it understands context:
-
-```python
-# Finds images specifically used as hero banners
-"large banner images on homepage"
-
-# Identifies product vs. lifestyle photography
-"product shots without lifestyle context"
-
-# Understands technical requirements
-"high-resolution images suitable for print"
-```
-
-### 2. Dynamic Website Generation
-
-Use crawled data to build personalized experiences:
-
-```python
-# Auto-generate gallery pages
-gallery_images = search_by_theme("minimalist design")
-
-# Create contextual image recommendations
-related_images = search_by_similarity(current_image_context)
-
-# Build responsive image sets
-responsive_set = find_image_variants(base_image_url)
-```
-
-### 3. Content Strategy Insights
-
-- **Visual Trend Analysis**: Identify popular design patterns
-- **Competitor Benchmarking**: Compare image strategies
-- **SEO Optimization**: Find images lacking proper alt text
-- **Performance Auditing**: Identify oversized or poorly formatted images
 
 ## 🔍 Under the Hood
 
@@ -762,31 +648,18 @@ class SessionManager:
 
 This project implements multiple layers of optimization for maximum performance and efficiency:
 
-#### 🚀 Multi-Layer Redis Caching System
+#### 🚀 Performance Metrics & Optimizations
 
-**Intelligent Caching Strategy:**
-
-```python
-# HTML Page Caching - Reduces crawl latency
-html_cache_key = f"html:{url_hash}:{limit}:{timestamp_day}"
-ttl = 7_days if static_content else 24_hours
-
-# Query Result Caching - Faster search responses
-query_cache_key = f"query:{query_hash}:{namespace}:{filters_hash}"
-ttl = 6_hours if popular_query else 1_hour
-
-# Embedding Caching - Reduces OpenAI API calls
-embedding_cache_key = f"embedding:{text_hash}:{model_version}"
-ttl = 30_days  # Embeddings rarely change
-```
-
-**Cache Performance Metrics:**
+**Cache Performance Benefits:**
 
 - ✅ **HTML Cache**: ~85% faster response times for repeated crawls
 - ✅ **Query Cache**: ~90% faster search results for duplicate queries
 - ✅ **Embedding Cache**: ~70% reduction in OpenAI API calls
+- ✅ **Parser Cache**: Eliminates AI parsing for repeated natural language queries
 - ✅ **Smart TTL Management**: Content-type aware expiration (static vs dynamic)
 - ✅ **Graceful Fallback**: System continues operation when Redis unavailable
+
+#### 🚀 Advanced System Optimizations
 
 #### ⚡ Memory-Efficient Architecture
 
@@ -910,26 +783,6 @@ for img in images:
     ])
 ```
 
-#### 🧹 Code Quality Optimizations
-
-**Recent Cleanup & Simplifications:**
-
-- ✅ **Removed Hard-coded Performance Claims**: Eliminated ~90 lines of fabricated speed calculations
-- ✅ **Honest Cache Reporting**: Real response times instead of fake percentages
-- ✅ **Dead Code Removal**: Deleted unused `/status-simple` endpoint
-- ✅ **API Simplification**: Streamlined to only include endpoints actually used by clients
-- ✅ **Enhanced Logging**: Comprehensive performance monitoring with real metrics
-
-**Cache Message Evolution:**
-
-```python
-# Before: Fabricated claims
-"🚀 Cache hit! Results loaded 92% faster (2h 15m old) - saved 92% of processing time"
-
-# After: Honest reporting
-"🚀 Cache hit! Results loaded instantly (2h 15m old)"
-```
-
 #### 📈 Performance Monitoring
 
 **Real-Time Metrics:**
@@ -960,31 +813,3 @@ class CacheMetrics:
 - ✅ **Environment Adaptation**: Automatic detection of platform limitations (Replit, Heroku)
 - ✅ **Resource Management**: Automatic session cleanup and memory management
 - ✅ **Error Recovery**: Graceful degradation when external services unavailable
-
-**Configuration Flexibility:**
-
-```env
-# Performance tuning variables
-MAX_CONCURRENT_CRAWLS=5          # Scale based on server capacity
-PINECONE_BATCH_SIZE=200         # Optimize for vector database performance
-SESSION_CLEANUP_HOURS=6         # Automatic resource cleanup
-ENABLE_SSE=true                 # Platform-specific SSE control
-```
-
-#### 📊 Measured Performance Improvements
-
-**Before Optimizations:**
-
-- Response time: ~5000ms for page crawls
-- Search latency: ~2000ms for queries
-- API calls: Full OpenAI usage for every embedding
-
-**After Optimizations:**
-
-- ✅ **85% faster** repeated HTML crawls (cache hits)
-- ✅ **90% faster** duplicate search queries (cache hits)
-- ✅ **70% reduction** in OpenAI API costs (embedding cache)
-- ✅ **Zero disk I/O** for content processing
-- ✅ **Sub-100ms** response times for cached operations
-
-These optimizations result in a **production-ready system** that can handle multiple concurrent users while maintaining fast response times and efficient resource utilization.
