@@ -86,18 +86,9 @@ class HTMLProcessor:
                     u = base_url + '/' + u.lstrip('/')
                 
                 img_format = get_image_format(u)
-                context = extract_context(img)
+                extracted_data = extract_context(img)
                 
-                alt_text = img.get('alt', '')
-                title_text = img.get('title', '')
-                class_attr = ' '.join(img.get('class', []))
-                
-                # Ensure all text fields are properly limited
-                alt_text_limited = alt_text[:500] if alt_text else ''
-                title_text_limited = title_text[:200] if title_text else ''
-                class_attr_limited = class_attr[:300] if class_attr else ''
-                
-                page_content = f"Alt: {alt_text_limited} | Title: {title_text_limited} | Class: {class_attr_limited} | Context: {context}"
+                page_content = f"Alt: {extracted_data['alt_text']} | Title: {extracted_data['title_text']} | Class: {extracted_data['class_attr']} | Context: {extracted_data['context']}"
                 page_content = page_content[:2000] if len(page_content) > 2000 else page_content
                 
                 doc = Document(
@@ -105,9 +96,9 @@ class HTMLProcessor:
                     metadata={
                         'img_url': u[:1000] if u else '',
                         'img_format': img_format,
-                        'alt_text': alt_text_limited,
-                        'title': title_text_limited,
-                        'class': class_attr_limited,
+                        'alt_text': extracted_data['alt_text'],
+                        'title': extracted_data['title_text'],
+                        'class': extracted_data['class_attr'],
                         'source_type': 'img',
                         'source_url': source_url[:1000] if source_url else '',
                         'source_page': urlparse(source_url).path[:200] if source_url else ''
@@ -134,27 +125,9 @@ class HTMLProcessor:
                     url_part = base_url + '/' + url_part.lstrip('/')
                 
                 img_format = get_image_format(url_part)
-                context = extract_context_from_source(source)
+                extracted_data = extract_context_from_source(source)
                 
-                picture = source.find_parent('picture')
-                alt_text = ''
-                title_text = ''
-                class_attr = ''
-                
-                if picture:
-                    img_in_picture = picture.find('img')
-                    if img_in_picture:
-                        alt_text = img_in_picture.get('alt', '')
-                        title_text = img_in_picture.get('title', '')
-                        class_attr = ' '.join(img_in_picture.get('class', []))
-                
-                # Ensure all text fields are properly limited
-                alt_text_limited = alt_text[:500] if alt_text else ''
-                title_text_limited = title_text[:200] if title_text else ''
-                class_attr_limited = class_attr[:300] if class_attr else ''
-                media_attr_limited = source.get('media', '')[:200] if source.get('media') else ''
-                
-                page_content = f"Alt: {alt_text_limited} | Title: {title_text_limited} | Class: {class_attr_limited} | Context: {context}"
+                page_content = f"Alt: {extracted_data['alt_text']} | Title: {extracted_data['title_text']} | Class: {extracted_data['class_attr']} | Context: {extracted_data['context']}"
                 page_content = page_content[:2000] if len(page_content) > 2000 else page_content
                 
                 doc = Document(
@@ -162,11 +135,11 @@ class HTMLProcessor:
                     metadata={
                         'img_url': url_part[:1000] if url_part else '',
                         'img_format': img_format,
-                        'alt_text': alt_text_limited,
-                        'title': title_text_limited,
-                        'class': class_attr_limited,
+                        'alt_text': extracted_data['alt_text'],
+                        'title': extracted_data['title_text'],
+                        'class': extracted_data['class_attr'],
                         'source_type': 'source',
-                        'media': media_attr_limited,
+                        'media': extracted_data['media_attr'],
                         'source_url': source_url[:1000] if source_url else '',
                         'source_page': urlparse(source_url).path[:200] if source_url else ''
                     }

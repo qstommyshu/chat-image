@@ -81,7 +81,7 @@ def get_image_format(url: str) -> str:
         return 'unknown'
 
 
-def extract_context_from_source(source_tag) -> str:
+def extract_context_from_source(source_tag) -> dict:
     """
     Extract context information from a source tag.
     
@@ -89,13 +89,17 @@ def extract_context_from_source(source_tag) -> str:
         source_tag: BeautifulSoup source tag element
         
     Returns:
-        Context string with media attributes and parent information
+        Dict with individual fields and formatted context string
     """
     context_parts = []
     
     media_attr = source_tag.get('media', '')[:200] if source_tag.get('media') else ''
     if media_attr:
         context_parts.append(f"Media: {media_attr}")
+    
+    alt_text = ''
+    title_text = ''
+    class_attr = ''
     
     picture = source_tag.find_parent('picture')
     if picture:
@@ -120,10 +124,18 @@ def extract_context_from_source(source_tag) -> str:
             context_parts.append(f"Parent text: {truncated_parent}")
     
     context = " | ".join(context_parts) if context_parts else str(source_tag)[:100]
-    return context[:1000] if len(context) > 1000 else context
+    context = context[:1000] if len(context) > 1000 else context
+    
+    return {
+        'alt_text': alt_text,
+        'title_text': title_text,
+        'class_attr': class_attr,
+        'media_attr': media_attr,
+        'context': context
+    }
 
 
-def extract_context(img_tag) -> str:
+def extract_context(img_tag) -> dict:
     """
     Extract context information from an img tag.
     
@@ -131,7 +143,7 @@ def extract_context(img_tag) -> str:
         img_tag: BeautifulSoup img tag element
         
     Returns:
-        Context string with alt text, title, class, and parent information
+        Dict with individual fields and formatted context string
     """
     context_parts = []
     
@@ -154,6 +166,13 @@ def extract_context(img_tag) -> str:
             context_parts.append(f"Parent text: {truncated_parent}")
     
     context = " | ".join(context_parts) if context_parts else str(img_tag)[:100]
-    return context[:1000] if len(context) > 1000 else context
+    context = context[:1000] if len(context) > 1000 else context
+    
+    return {
+        'alt_text': alt_text,
+        'title_text': title_text,
+        'class_attr': class_attr,
+        'context': context
+    }
 
  
