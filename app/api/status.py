@@ -11,6 +11,7 @@ from flask import Blueprint, jsonify, Response
 
 from app.config import Config
 from app.models.session import session_manager
+from app.services.cache import cache_service
 
 # Create blueprint
 status_bp = Blueprint('status', __name__)
@@ -54,8 +55,17 @@ def crawl_status_sse(session_id):
         and handles connection lifecycle (heartbeats, completion detection).
         """
         try:
-            # Send initial connection confirmation
-            yield f"data: {json.dumps({'type': 'connected', 'session_id': session_id})}\n\n"
+            # Check if cache is available
+            cache_available = cache_service.is_available()
+            
+            # Send initial connection confirmation with cache status
+            initial_message = {
+                'type': 'connected', 
+                'session_id': session_id,
+                'cache_available': cache_available,
+                'skip_cache': session.skip_cache if hasattr(session, 'skip_cache') else False
+            }
+            yield f"data: {json.dumps(initial_message)}\n\n"
             
             # Timeout counter to prevent infinite connections
             max_duration = Config.SSE_TIMEOUT_SECONDS
@@ -66,6 +76,17 @@ def crawl_status_sse(session_id):
                 try:
                     # Wait for new message (1 second timeout)
                     message = session.messages.get(timeout=1)
+                    
+                    # Enhance message with cache info if applicable
+                    if message['type'] == 'progress' and hasattr(session, 'cache_hits') and session.cache_hits > 0:
+                        if 'cache_hit' not in message['data']:
+                            message['data']['cache_hit'] = True
+                            message['data']['cache_hits'] = session.cache_hits
+                            
+                            if hasattr(session, 'cache_performance_gain') and session.cache_performance_gain:
+                                message['data']['cache_performance_gain'] = session.cache_performance_gain
+                    
+                    # Send the message
                     yield f"data: {json.dumps(message)}\n\n"
                     
                     # Close connection if crawl is finished (success or error)
@@ -80,10 +101,20 @@ def crawl_status_sse(session_id):
                     # Check if session has finished (failsafe)
                     if session.completed or session.error:
                         # Send final status if available
-                        if session.completed:
-                            yield f"data: {json.dumps({'type': 'completed', 'status': 'completed'})}\n\n"
-                        elif session.error:
-                            yield f"data: {json.dumps({'type': 'error', 'status': 'error', 'message': session.error})}\n\n"
+                        final_message = {
+                            'type': 'completed' if session.completed else 'error',
+                            'status': 'completed' if session.completed else 'error'
+                        }
+                        
+                        if session.error:
+                            final_message['message'] = session.error
+                            
+                        # Add cache information to final message
+                        if session.completed and hasattr(session, 'cache_hits') and session.cache_hits > 0:
+                            final_message['cache_hits'] = session.cache_hits
+                            final_message['cache_performance_gain'] = getattr(session, 'cache_performance_gain', None)
+                            
+                        yield f"data: {json.dumps(final_message)}\n\n"
                         break
                 
                 except Exception as e:
@@ -142,7 +173,11 @@ def crawl_status_polling(session_id):
     except queue.Empty:
         pass
     
-    return jsonify({
+    # Check if cache is available
+    cache_available = cache_service.is_available()
+    
+    # Prepare response with basic session info
+    response = {
         "session_id": session_id,
         "status": session.status,
         "completed": session.completed,
@@ -150,5 +185,22 @@ def crawl_status_polling(session_id):
         "total_images": session.total_images,
         "total_pages": session.total_pages,
         "messages": messages,
-        "image_stats": session.image_stats
-    }) 
+        "image_stats": session.image_stats,
+        "cache_available": cache_available,
+        "skip_cache": session.skip_cache if hasattr(session, 'skip_cache') else False
+    }
+    
+    # Add cache-specific information if available
+    if hasattr(session, 'cache_hits') and session.cache_hits > 0:
+        response["cache_hits"] = session.cache_hits
+        response["cache_performance_gain"] = getattr(session, 'cache_performance_gain', None)
+        
+        # Add cache info to image stats if not already there
+        if session.image_stats and "cache" not in session.image_stats and session.cache_hits > 0:
+            response["image_stats"]["cache"] = {
+                "hit": True,
+                "cache_hits": session.cache_hits,
+                "performance_gain": getattr(session, 'cache_performance_gain', None)
+            }
+    
+    return jsonify(response) 

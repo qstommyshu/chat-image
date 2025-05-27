@@ -28,10 +28,21 @@ class CrawlSession:
         error (str): Error message if crawl failed
         completed (bool): Whether the crawl has finished successfully
         image_stats (dict): Statistics about images found (formats, pages)
+        skip_cache (bool): Whether to skip cache lookup for this session
+        cache_hits (int): Number of cache hits during this session
+        cache_performance_gain (str): Estimated performance gain from cache usage
     """
     
-    def __init__(self, session_id: str, url: str, limit: int):
-        """Initialize a new crawl session."""
+    def __init__(self, session_id: str, url: str, limit: int, skip_cache: bool = False):
+        """
+        Initialize a new crawl session.
+        
+        Args:
+            session_id: Unique identifier for this session
+            url: The URL being crawled
+            limit: Maximum number of pages to crawl
+            skip_cache: Whether to skip cache lookup for this session
+        """
         self.session_id = session_id
         self.url = url
         self.limit = limit
@@ -42,6 +53,11 @@ class CrawlSession:
         self.error = None
         self.completed = False
         self.image_stats = {}
+        
+        # Cache-related properties
+        self.skip_cache = skip_cache
+        self.cache_hits = 0
+        self.cache_performance_gain = ""
         
     def add_message(self, message_type: str, data: dict):
         """
@@ -73,7 +89,7 @@ class SessionManager:
         self.crawl_lock = threading.Lock()
         self.max_concurrent_crawls = max_concurrent_crawls or Config.MAX_CONCURRENT_CRAWLS
         
-    def create_session(self, session_id: str, url: str, limit: int, domain: str) -> tuple[CrawlSession, Optional[str]]:
+    def create_session(self, session_id: str, url: str, limit: int, domain: str, skip_cache: bool = False) -> tuple[CrawlSession, Optional[str]]:
         """
         Create a new crawl session with concurrency checks.
         
@@ -82,6 +98,7 @@ class SessionManager:
             url: URL to crawl
             limit: Maximum pages to crawl
             domain: Domain being crawled (kept for backwards compatibility but not used for restrictions)
+            skip_cache: Whether to skip cache lookup for this session
             
         Returns:
             Tuple of (session, error_message). Error message is None if successful.
@@ -97,7 +114,7 @@ class SessionManager:
                 return None, f"Maximum {self.max_concurrent_crawls} concurrent crawls allowed. Please try again later."
             
             # Create session - each user gets their own isolated session and namespace
-            session = CrawlSession(session_id, url, limit)
+            session = CrawlSession(session_id, url, limit, skip_cache)
             self.crawl_sessions[session_id] = session
             
             return session, None
@@ -106,8 +123,6 @@ class SessionManager:
         """Get a session by ID."""
         return self.crawl_sessions.get(session_id)
     
-
-    
     def set_namespace(self, session_id: str, namespace: str):
         """Set the Pinecone namespace for a session."""
         self.session_namespaces[session_id] = namespace
@@ -115,10 +130,6 @@ class SessionManager:
     def get_namespace(self, session_id: str) -> Optional[str]:
         """Get the Pinecone namespace for a session."""
         return self.session_namespaces.get(session_id)
-    
-
-    
-
 
 
 # Global session manager instance

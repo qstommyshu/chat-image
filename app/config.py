@@ -48,6 +48,25 @@ class Config:
     PINECONE_CLOUD = "aws"
     PINECONE_REGION = "us-east-1"
     
+    # Redis Cache Configuration
+    REDIS_ENABLED = os.environ.get("REDIS_ENABLED", "true").lower() in ("true", "1", "yes")
+    REDIS_CLOUD_URL = os.getenv("REDIS_CLOUD_URL")
+    REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+    REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
+    REDIS_PASSWORD = os.getenv("REDIS_PASSWORD")
+    REDIS_DB = int(os.getenv("REDIS_DB", "0"))
+    REDIS_MAX_CONNECTIONS = int(os.getenv("REDIS_MAX_CONNECTIONS", "20"))
+    
+    # Cache TTL Configuration (in seconds)
+    HTML_CACHE_TTL = int(os.getenv("HTML_CACHE_TTL", "86400"))  # 24 hours
+    QUERY_CACHE_TTL = int(os.getenv("QUERY_CACHE_TTL", "3600"))  # 1 hour
+    EMBEDDING_CACHE_TTL = int(os.getenv("EMBEDDING_CACHE_TTL", "2592000"))  # 30 days
+    
+    # Cache Size Limits (in MB)
+    MAX_HTML_CACHE_SIZE_MB = int(os.getenv("MAX_HTML_CACHE_SIZE_MB", "100"))
+    MAX_QUERY_CACHE_SIZE_MB = int(os.getenv("MAX_QUERY_CACHE_SIZE_MB", "50"))
+    MAX_EMBEDDING_CACHE_SIZE_MB = int(os.getenv("MAX_EMBEDDING_CACHE_SIZE_MB", "200"))
+    
     @classmethod
     def validate_api_keys(cls):
         """Validate that all required API keys are present."""

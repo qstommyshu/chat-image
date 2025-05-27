@@ -16,3 +16,5 @@ pytest-mock
 pytest-asyncio
 pytest-cov
 gevent
+redis
+aioredis

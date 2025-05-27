@@ -48,21 +48,48 @@ class HTMLProcessor:
         all_docs = []
         
         for i, page_data in enumerate(crawl_result.data, 1):
-            url = page_data.metadata.get('url', f'page_{i}')
-            print(f"Processing page {i}: {url}")
-            
-            # Fix relative image paths to absolute URLs
-            fixed_html = fix_image_paths(page_data.rawHtml, url)
-            
-            # Process HTML content directly
-            docs = self.process_html_content(fixed_html, url)
-            all_docs.extend(docs)
-            
-            # Count and report image elements found
-            soup = BeautifulSoup(fixed_html, 'html.parser')
-            img_count = len(soup.find_all('img'))
-            source_count = len(soup.find_all('source'))
-            print(f"  ✔ Found {img_count} img tags, {source_count} source tags")
+            try:
+                # Handle both FirecrawlDocument objects and mock objects with defensive coding
+                url = None
+                html_content = None
+                
+                # Try to get URL - handle both attribute access and dict access
+                if hasattr(page_data, 'metadata') and page_data.metadata:
+                    url = page_data.metadata.get('url', f'page_{i}')
+                elif isinstance(page_data, dict) and 'url' in page_data:
+                    url = page_data.get('url', f'page_{i}')
+                else:
+                    url = f'page_{i}'
+                
+                # Try to get HTML content - handle both attribute access and dict access
+                if hasattr(page_data, 'rawHtml'):
+                    html_content = page_data.rawHtml
+                elif isinstance(page_data, dict) and 'rawHtml' in page_data:
+                    html_content = page_data.get('rawHtml', '')
+                else:
+                    print(f"  ⚠ Warning: No HTML content found for page {i}")
+                    continue
+                
+                print(f"Processing page {i}: {url}")
+                
+                # Fix relative image paths to absolute URLs
+                fixed_html = fix_image_paths(html_content, url)
+                
+                # Process HTML content directly
+                docs = self.process_html_content(fixed_html, url)
+                all_docs.extend(docs)
+                
+                # Count and report image elements found
+                soup = BeautifulSoup(fixed_html, 'html.parser')
+                img_count = len(soup.find_all('img'))
+                source_count = len(soup.find_all('source'))
+                print(f"  ✔ Found {img_count} img tags, {source_count} source tags")
+                
+            except Exception as e:
+                print(f"  ⚠ Error processing page {i}: {e}")
+                print(f"  Page data type: {type(page_data)}")
+                # Continue with next page instead of failing entire processing
+                continue
         
         print(f"Processed {len(all_docs)} image documents")
         return all_docs

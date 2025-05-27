@@ -6,13 +6,30 @@ using Firecrawl and manages the complete crawl workflow.
 """
 
 import threading
+import logging
 from datetime import datetime
+from typing import Dict, Optional
 from urllib.parse import urlparse
 from firecrawl import ScrapeOptions
 
 from app.config import clients
 from app.models.session import session_manager, CrawlSession
 from app.services.processor import HTMLProcessor
+from app.services.cache import cache_service
+
+# Set up crawler-specific logger
+crawler_logger = logging.getLogger('crawler')
+crawler_logger.setLevel(logging.INFO)
+
+# Create console handler if it doesn't exist
+if not crawler_logger.handlers:
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    console_handler.setFormatter(formatter)
+    crawler_logger.addHandler(console_handler)
 
 
 class CrawlerService:
@@ -20,6 +37,7 @@ class CrawlerService:
     
     def __init__(self):
         self.html_processor = HTMLProcessor()
+        self.cache_service = cache_service
     
     def start_crawl(self, session: CrawlSession) -> None:
         """
@@ -32,12 +50,81 @@ class CrawlerService:
         thread.daemon = True  # Allow server shutdown even if thread is running
         thread.start()
     
+    async def check_html_cache(self, url: str, limit: int = 1) -> Optional[Dict]:
+        """
+        Check if the URL's HTML content is available in the cache.
+        
+        Args:
+            url: URL to check in cache
+            limit: Maximum number of pages crawled (affects cache key)
+            
+        Returns:
+            Cached HTML content or None if not found
+        """
+        return await self.cache_service.get_html_cache(url, limit)
+    
+    async def store_html_cache(self, url: str, html_content: str, page_data: Dict, limit: int = 1) -> bool:
+        """
+        Store HTML content in the cache.
+        
+        Args:
+            url: URL being cached
+            html_content: Raw HTML content
+            page_data: Additional page metadata
+            limit: Maximum number of pages crawled (affects cache key)
+            
+        Returns:
+            True if caching was successful
+        """
+        # Create cache entry with relevant metadata
+        cache_entry = {
+            "url": url,
+            "html_content": html_content,
+            "crawl_timestamp": datetime.now().isoformat(),
+            "page_type": self._detect_page_type(url),
+            "firecrawl_metadata": page_data
+        }
+        
+        # Set dynamic TTL based on page type
+        page_type = cache_entry["page_type"]
+        ttl = 7 * 24 * 60 * 60 if page_type == "static" else 24 * 60 * 60
+        
+        return await self.cache_service.set_html_cache(url, cache_entry, limit, ttl)
+    
+    def _detect_page_type(self, url: str) -> str:
+        """
+        Detect if a URL is likely to be static or dynamic content.
+        
+        Args:
+            url: URL to analyze
+            
+        Returns:
+            "static" or "dynamic"
+        """
+        # Simple heuristics for detecting page type
+        dynamic_indicators = [
+            "news", "blog", "article", "post",
+            "rss", "feed", "update", "latest"
+        ]
+        
+        # Check URL for dynamic indicators
+        url_lower = url.lower()
+        if any(indicator in url_lower for indicator in dynamic_indicators):
+            return "dynamic"
+        
+        # Check for date patterns in URL (common in news/blogs)
+        if any(str(year) in url for year in range(2020, datetime.now().year + 1)):
+            return "dynamic"
+        
+        # Default to static for most corporate/product pages
+        return "static"
+    
     def _perform_crawl(self, session: CrawlSession) -> None:
         """
         Execute the complete crawling workflow in a background thread.
         
         This function handles the entire crawl lifecycle:
-        1. Website crawling using Firecrawl
+        1. Website crawling using Firecrawl or cache retrieval
         2. Direct HTML processing and image extraction (no disk storage)
         3. Vector database indexing for search with session isolation
         4. Status updates via SSE
@@ -50,7 +137,7 @@ class CrawlerService:
         """
         domain = None
         try:
-            # Phase 1: Website Crawling
+            # Phase 1: Website Crawling or Cache Retrieval
             session.status = "crawling"
             session.add_message("status", {
                 "status": "crawling", 
@@ -61,29 +148,148 @@ class CrawlerService:
             parsed_url = urlparse(session.url)
             domain = parsed_url.netloc.replace('www.', '')
             
-            # Execute the crawl directly using Firecrawl
-            print(f"\n🕷️ Starting to crawl {session.url} (limit: {session.limit} pages)...")
+            # Check cache for existing content if cache is enabled
+            cache_hit = False
+            cached_html = None
             
-            crawl_result = clients.firecrawl_app.crawl_url(
-                session.url,
-                limit=session.limit,
-                scrape_options=ScrapeOptions(
-                    formats=['rawHtml'],           # Get raw HTML content
-                    onlyMainContent=False,         # Include full page content
-                    includeTags=['img', 'source', 'picture', 'video'],  # Keep media tags
-                    renderJs=True,                 # Execute JavaScript for dynamic content
-                    waitFor=3000,                 # Wait 3 seconds for lazy loading
-                    skipTlsVerification=False,     # Verify SSL certificates
-                    removeBase64Images=False       # Keep base64-encoded images
-                ),
-            )
+            if self.cache_service.is_available() and not session.skip_cache:
+                # Async operation requires proper handling in threaded context
+                import asyncio
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                
+                try:
+                    cached_html = loop.run_until_complete(self.cache_service.get_html_cache(session.url, session.limit))
+                    
+                    if cached_html:
+                        cache_hit = True
+                        cache_info = cached_html.get("_cache", {})
+                        
+                        # Log cache hit for server logs
+                        crawler_logger.info(
+                            f"CRAWLER CACHE HIT for {session.url} - "
+                            f"Age: {cache_info.get('cache_age', 'unknown')}, "
+                            f"Performance: {cache_info.get('performance_gain', 'unknown')}"
+                        )
+                        
+                        session.add_message("progress", {
+                            "message": f"Cache hit! Using cached content from {cache_info.get('cache_age', 'previous crawl')}",
+                            "cache_hit": True,
+                            "cache_info": cache_info
+                        })
+                finally:
+                    loop.close()
             
-            print(f"✅ Successfully crawled {len(crawl_result.data)} pages")
-            session.total_pages = len(crawl_result.data)
-            
-            session.add_message("progress", {
-                "message": f"Successfully crawled {session.total_pages} pages"
-            })
+            if cache_hit:
+                # Use cached content
+                crawler_logger.info(f"🔄 Using cached content for {session.url} - skipping firecrawl")
+                
+                # Extract data from cache
+                html_content = cached_html.get("html_content", "")
+                firecrawl_metadata = cached_html.get("firecrawl_metadata", {})
+                
+                # Create a mock crawl result with the cached data that matches FirecrawlDocument interface
+                from types import SimpleNamespace
+                
+                # Create a mock page object that matches the interface expected by HTMLProcessor
+                mock_page = SimpleNamespace()
+                mock_page.rawHtml = html_content
+                mock_page.metadata = {
+                    "url": session.url,
+                    **firecrawl_metadata
+                }
+                
+                crawl_result = SimpleNamespace()
+                crawl_result.data = [mock_page]
+                
+                session.total_pages = 1
+                session.cache_hits = 1
+                session.cache_performance_gain = cached_html.get("_cache", {}).get("performance_gain", "")
+                
+                session.add_message("progress", {
+                    "message": f"Using cached content - {session.cache_performance_gain}",
+                    "cache_hit": True
+                })
+                
+                crawler_logger.info(
+                    f"Cache content utilized successfully for {session.url} - "
+                    f"Performance gain: {session.cache_performance_gain}"
+                )
+            else:
+                # Execute the crawl directly using Firecrawl
+                crawler_logger.info(f"🕷️ Starting fresh crawl for {session.url} (limit: {session.limit} pages) - no cache hit")
+                print(f"\n🕷️ Starting to crawl {session.url} (limit: {session.limit} pages)...")
+                
+                crawl_result = clients.firecrawl_app.crawl_url(
+                    session.url,
+                    limit=session.limit,
+                    scrape_options=ScrapeOptions(
+                        formats=['rawHtml'],           # Get raw HTML content
+                        onlyMainContent=False,         # Include full page content
+                        includeTags=['img', 'source', 'picture', 'video'],  # Keep media tags
+                        renderJs=True,                 # Execute JavaScript for dynamic content
+                        waitFor=3000,                 # Wait 3 seconds for lazy loading
+                        skipTlsVerification=False,     # Verify SSL certificates
+                        removeBase64Images=False       # Keep base64-encoded images
+                    ),
+                )
+                
+                print(f"✅ Successfully crawled {len(crawl_result.data)} pages")
+                session.total_pages = len(crawl_result.data)
+                
+                session.add_message("progress", {
+                    "message": f"Successfully crawled {session.total_pages} pages"
+                })
+                
+                # Cache the HTML content if cache is available
+                if self.cache_service.is_available() and len(crawl_result.data) > 0:
+                    # Set up async event loop
+                    import asyncio
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    
+                    try:
+                        # Cache each page's HTML content
+                        for page in crawl_result.data:
+                            try:
+                                # Access FirecrawlDocument attributes properly
+                                # Based on HTMLProcessor usage: page.metadata.get('url') and page.rawHtml
+                                url = None
+                                html = ""
+                                
+                                if hasattr(page, 'metadata') and page.metadata:
+                                    url = page.metadata.get('url', None)
+                                
+                                if hasattr(page, 'rawHtml'):
+                                    html = page.rawHtml or ""
+                                
+                                if url and html:
+                                    # Create page metadata from FirecrawlDocument attributes
+                                    page_data = {}
+                                    
+                                    # Extract metadata from the FirecrawlDocument
+                                    if hasattr(page, 'metadata') and page.metadata:
+                                        for key, value in page.metadata.items():
+                                            if key not in ['rawHtml'] and value is not None:
+                                                page_data[key] = value
+                                    
+                                    success = loop.run_until_complete(
+                                        self.store_html_cache(url, html, page_data, session.limit)
+                                    )
+                                    
+                                    if success:
+                                        crawler_logger.info(f"📦 HTML content cached for {url}")
+                                        print(f"📦 Cached HTML content for {url}")
+                                    else:
+                                        crawler_logger.warning(f"Failed to cache HTML content for {url}")
+                                        
+                            except Exception as page_error:
+                                crawler_logger.error(f"Error caching page content: {page_error}")
+                                crawler_logger.debug(f"Page object type: {type(page)}")
+                                crawler_logger.debug(f"Page attributes: {dir(page) if hasattr(page, '__dict__') else 'No attributes'}")
+                                # Continue with next page instead of failing the entire crawl
+                    finally:
+                        loop.close()
             
             # Phase 2: Direct Image Processing (no disk I/O)
             session.status = "processing"
@@ -114,9 +320,18 @@ class CrawlerService:
                 "pages": page_stats
             }
             
+            # Add cache info to the stats if applicable
+            if cache_hit:
+                session.image_stats["cache"] = {
+                    "hit": True,
+                    "cache_age": cached_html.get("_cache", {}).get("cache_age", "unknown"),
+                    "performance_gain": session.cache_performance_gain
+                }
+            
             session.add_message("progress", {
                 "message": f"Processed {session.total_images} images from {session.total_pages} pages (no disk storage needed)",
-                "stats": session.image_stats
+                "stats": session.image_stats,
+                "cache_hit": cache_hit if cache_hit else None
             })
             
             # Phase 3: Vector Database Indexing
@@ -133,6 +348,10 @@ class CrawlerService:
             for doc in all_docs:
                 doc.metadata['session_id'] = session.session_id
                 doc.metadata['crawl_timestamp'] = datetime.now().isoformat()
+                # Add cache info to metadata if applicable
+                if cache_hit:
+                    doc.metadata['cache_hit'] = True
+                    doc.metadata['cache_age'] = cached_html.get("_cache", {}).get("cache_age", "unknown")
             
             # Add documents to Pinecone in batches to avoid size limits
             self._index_documents_in_batches(all_docs, namespace, session)
@@ -150,7 +369,8 @@ class CrawlerService:
                 "summary": summary,
                 "total_images": session.total_images,
                 "total_pages": session.total_pages,
-                "stats": session.image_stats
+                "stats": session.image_stats,
+                "cache_hit": cache_hit if cache_hit else None
             })
             
         except Exception as e:
