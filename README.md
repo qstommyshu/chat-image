@@ -286,91 +286,50 @@ graph TB
 ### 🧩 Search Processing Flow & Caching Strategy
 
 ```mermaid
-graph TB
-    subgraph "🔄 Complete Search Flow with Multi-Layer Caching"
-        USER_INPUT["👤 User Natural Language Query<br/>'Show me iPhone camera JPG images'"]
-
+graph LR
+    subgraph "🔄 Four-Layer Caching Strategy"
         subgraph "Layer 1: Parser Cache"
-            PARSER_CHECK["🔍 Check Parser Cache<br/>parser_{user_message}"]
-            PARSER_CACHE["💾 Cached Parsed Result<br/>TTL: 7 days"]
-            AI_PARSER["🧠 OpenAI Query Parser<br/>Extract search terms + formats"]
+            PARSER_KEY["🗂️ parser_{user_message}"]
+            PARSER_PURPOSE["🎯 Purpose: Cache AI-parsed query results<br/>to avoid re-parsing similar natural language requests"]
+            PARSER_TTL["⏰ TTL: 7 days"]
+            PARSER_STORAGE["💾 Stores: JSON query structure + timestamp"]
         end
 
         subgraph "Layer 2: Query Cache"
-            QUERY_CHECK["🔍 Check Query Cache<br/>query:{search_query}:{namespace}:{filters}"]
-            QUERY_CACHE["💾 Cached Search Results<br/>TTL: 30min-1hr"]
+            QUERY_KEY["🗂️ query:{query_hash}:{namespace}:{filters}"]
+            QUERY_PURPOSE["🎯 Purpose: Cache complete search results<br/>for exact query+namespace+filter combinations"]
+            QUERY_TTL["⏰ TTL: 30min (filtered) / 1h (standard)"]
+            QUERY_STORAGE["💾 Stores: Full search results + metadata"]
         end
 
         subgraph "Layer 3: Embedding Cache"
-            EMB_CHECK["🔍 Check Embedding Cache<br/>embedding:{search_query}"]
-            EMB_CACHE["💾 Cached Vector Embedding<br/>TTL: 30 days"]
-            OPENAI_EMB["🧠 OpenAI Embedding API<br/>Generate 1536D vector"]
+            EMB_KEY["🗂️ embedding:{text_hash}:{model}"]
+            EMB_PURPOSE["🎯 Purpose: Cache vector embeddings<br/>to avoid OpenAI API calls for repeated text"]
+            EMB_TTL["⏰ TTL: 30 days"]
+            EMB_STORAGE["💾 Stores: 1536D vectors + creation timestamp"]
         end
 
-        subgraph "🎯 Search Processing Pipeline"
-            VECTOR_SEARCH["🔍 Pinecone Vector Search<br/>Semantic similarity"]
-            KEYWORD_BOOST["🔤 Keyword Relevance Boost<br/>Alt-text exact matches"]
-            FORMAT_FILTER["🗂️ Format Filtering<br/>JPG/PNG preference"]
-            DEDUP["🧹 Alt Text Deduplication<br/>Remove similar content"]
-            FINAL_RANK["📊 Hybrid Ranking<br/>Semantic + Keyword scores"]
+        subgraph "Layer 4: HTML Cache"
+            HTML_KEY["🗂️ html:{url_hash}:{limit}:{date}"]
+            HTML_PURPOSE["🎯 Purpose: Cache crawled HTML content<br/>to avoid re-crawling same pages"]
+            HTML_TTL["⏰ TTL: 7d (static) / 24h (dynamic)"]
+            HTML_STORAGE["💾 Stores: Raw HTML + page metadata"]
         end
-
-        FINAL_RESULTS["✨ Ranked Results<br/>Max 5 unique images"]
     end
 
-    %% Flow connections
-    USER_INPUT --> PARSER_CHECK
-    PARSER_CHECK -->|Cache Hit| PARSER_CACHE
-    PARSER_CHECK -->|Cache Miss| AI_PARSER
-    AI_PARSER --> QUERY_CHECK
-    PARSER_CACHE --> QUERY_CHECK
+    subgraph "🎯 Search Processing Pipeline"
+        ALT_NORM["📝 Alt Text Normalization"]
+        SEMANTIC["🧠 Semantic Similarity<br/>Vector cosine distance"]
+        KEYWORD["🔤 Keyword Relevance<br/>Alt-text matching"]
+        ALT_FILTER["🧹 Alt Text Filtering"]
+        UNIQUE["✨ Unique Results Only"]
 
-    QUERY_CHECK -->|Cache Hit| QUERY_CACHE
-    QUERY_CHECK -->|Cache Miss| EMB_CHECK
-    QUERY_CACHE --> FINAL_RESULTS
-
-    EMB_CHECK -->|Cache Hit| EMB_CACHE
-    EMB_CHECK -->|Cache Miss| OPENAI_EMB
-    EMB_CACHE --> VECTOR_SEARCH
-    OPENAI_EMB --> VECTOR_SEARCH
-
-    VECTOR_SEARCH --> KEYWORD_BOOST
-    KEYWORD_BOOST --> FORMAT_FILTER
-    FORMAT_FILTER --> DEDUP
-    DEDUP --> FINAL_RANK
-    FINAL_RANK --> FINAL_RESULTS
-
-    %% Cache storage flows
-    AI_PARSER -.->|Store| PARSER_CACHE
-    FINAL_RANK -.->|Store| QUERY_CACHE
-    OPENAI_EMB -.->|Store| EMB_CACHE
-
-    %% Styling
-    classDef userLayer fill:#e1f5fe,stroke:#01579b,stroke-width:2px
-    classDef cacheLayer fill:#fff3e0,stroke:#e65100,stroke-width:2px
-    classDef processLayer fill:#e8f5e8,stroke:#1b5e20,stroke-width:2px
-    classDef resultLayer fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
-
-    class USER_INPUT userLayer
-    class PARSER_CACHE,QUERY_CACHE,EMB_CACHE cacheLayer
-    class VECTOR_SEARCH,KEYWORD_BOOST,FORMAT_FILTER,DEDUP,FINAL_RANK processLayer
-    class FINAL_RESULTS resultLayer
+        ALT_NORM --> SEMANTIC
+        SEMANTIC --> KEYWORD
+        KEYWORD --> ALT_FILTER
+        ALT_FILTER --> UNIQUE
+    end
 ```
-
-#### 🎯 Cache Strategy Details
-
-| Cache Layer         | Purpose                          | Key Format                            | TTL       | Saves                      |
-| ------------------- | -------------------------------- | ------------------------------------- | --------- | -------------------------- |
-| **Parser Cache**    | Avoid re-parsing similar queries | `parser_{user_message}`               | 7 days    | OpenAI parsing API calls   |
-| **Query Cache**     | Store complete search results    | `query:{query}:{namespace}:{filters}` | 30min-1hr | Entire search process      |
-| **Embedding Cache** | Store vector embeddings          | `embedding:{text}:{model}`            | 30 days   | OpenAI embedding API calls |
-
-#### 🔄 Cache Hit Performance
-
-- **Parser Cache Hit**: ~95% faster (skip AI parsing)
-- **Query Cache Hit**: ~90% faster (skip entire search)
-- **Embedding Cache Hit**: ~70% faster (skip vector generation)
-- **Combined Cache Strategy**: Up to 95% response time reduction
 
 ## 📋 Prerequisites
 
