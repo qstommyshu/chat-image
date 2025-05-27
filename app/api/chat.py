@@ -102,7 +102,14 @@ async def chat():
         if cache_info and cache_info.get("cache_hit"):
             cache_age = cache_info.get("cache_age", "")
             performance_gain = cache_info.get("performance_gain", "")
+            time_saved_percent = cache_info.get("time_saved_percent", "")
             response += f"\n\n🚀 Cache hit! Results loaded {performance_gain} ({cache_age} old)"
+            if time_saved_percent:
+                response += f" - saved {time_saved_percent}% of processing time"
+                
+        # Add parser cache hit indication
+        if parser_cache_info and parser_cache_info.get("cache_hit"):
+            response += f"\n💡 Query parsing cache hit!"
     
     # Add context for first-time users
     if len(chat_history) == 1:  # Only AI's initial greeting message

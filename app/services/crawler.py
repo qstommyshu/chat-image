@@ -168,8 +168,7 @@ class CrawlerService:
                         # Log cache hit for server logs
                         crawler_logger.info(
                             f"CRAWLER CACHE HIT for {session.url} - "
-                            f"Age: {cache_info.get('cache_age', 'unknown')}, "
-                            f"Performance: {cache_info.get('performance_gain', 'unknown')}"
+                            f"Age: {cache_info.get('cache_age', 'unknown')}"
                         )
                         
                         session.add_message("progress", {
@@ -204,16 +203,16 @@ class CrawlerService:
                 
                 session.total_pages = 1
                 session.cache_hits = 1
-                session.cache_performance_gain = cached_html.get("_cache", {}).get("performance_gain", "")
+                cache_age = cached_html.get("_cache", {}).get("cache_age", "unknown")
                 
                 session.add_message("progress", {
-                    "message": f"Using cached content - {session.cache_performance_gain}",
+                    "message": f"Using cached content - {cache_age} old",
                     "cache_hit": True
                 })
                 
                 crawler_logger.info(
                     f"Cache content utilized successfully for {session.url} - "
-                    f"Performance gain: {session.cache_performance_gain}"
+                    f"Age: {cache_age} old"
                 )
             else:
                 # Execute the crawl directly using Firecrawl
@@ -234,11 +233,18 @@ class CrawlerService:
                     ),
                 )
                 
-                print(f"✅ Successfully crawled {len(crawl_result.data)} pages")
+                # Create crawl success message with cache info if applicable
+                crawl_message = f"Successfully crawled {len(crawl_result.data)} pages"
+                if cache_hit:
+                    cache_age = cached_html.get("_cache", {}).get("cache_age", "unknown")
+                    crawl_message += f" 🚀 (Cache hit! Content was {cache_age} old)"
+                
+                print(f"✅ {crawl_message}")
                 session.total_pages = len(crawl_result.data)
                 
                 session.add_message("progress", {
-                    "message": f"Successfully crawled {session.total_pages} pages"
+                    "message": crawl_message,
+                    "cache_hit": cache_hit if cache_hit else None
                 })
                 
                 # Cache the HTML content if cache is available
@@ -324,8 +330,7 @@ class CrawlerService:
             if cache_hit:
                 session.image_stats["cache"] = {
                     "hit": True,
-                    "cache_age": cached_html.get("_cache", {}).get("cache_age", "unknown"),
-                    "performance_gain": session.cache_performance_gain
+                    "cache_age": cached_html.get("_cache", {}).get("cache_age", "unknown")
                 }
             
             session.add_message("progress", {
@@ -362,11 +367,21 @@ class CrawlerService:
             # Phase 4: Completion
             summary = self._generate_crawl_summary(session)
             
+            # Print final completion message with cache info
+            completion_msg = f"Crawling completed! Found {session.total_images} images across {session.total_pages} pages"
+            if hasattr(session, 'cache_hits') and session.cache_hits > 0:
+                cache_age = session.image_stats.get('cache', {}).get('cache_age', 'unknown')
+                completion_msg += f" 🚀 (Cache hit! Content was {cache_age} old)"
+            
+            print(f"✅ {completion_msg}")
+            crawler_logger.info(f"CRAWL COMPLETED - {completion_msg}")
+            
             session.status = "completed"
             session.completed = True
             session.add_message("completed", {
                 "status": "completed",
                 "summary": summary,
+                "completion_message": completion_msg,  # Add the formatted completion message
                 "total_images": session.total_images,
                 "total_pages": session.total_pages,
                 "stats": session.image_stats,
@@ -433,7 +448,14 @@ class CrawlerService:
         pages_str = ", ".join([p.split('/')[-1] or "homepage" for p in main_pages])
         
         # Build complete summary message
-        summary = f"I've successfully crawled {session.url} and found {session.total_images} images across {session.total_pages} pages. "
+        if hasattr(session, 'cache_hits') and session.cache_hits > 0:
+            # Include cache hit information in summary
+            cache_age = session.image_stats.get('cache', {}).get('cache_age', 'unknown')
+            summary = f"✅ Successfully crawled {session.url} and found {session.total_images} images across {session.total_pages} pages"
+            summary += f" 🚀 (Cache hit! Content was {cache_age} old). "
+        else:
+            summary = f"I've successfully crawled {session.url} and found {session.total_images} images across {session.total_pages} pages. "
+            
         summary += f"The images include {formats_str}. "
         summary += f"Main pages include: {pages_str}. "
         summary += "You can now search for specific images by describing what you're looking for!"

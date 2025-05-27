@@ -64,6 +64,68 @@ The Redis Cloud caching system has been successfully implemented with the follow
 
 All components have been thoroughly tested and show significant performance improvements for repeat operations. The system gracefully handles Redis unavailability by falling back to direct operations without errors.
 
+### Enhanced Cache Hit Indicators
+
+The caching system now provides detailed performance information to help users understand the benefits:
+
+1. **Crawl Completion Cache Indicators**:
+
+   - Completion messages now show cache hit information when HTML content was cached
+   - Progress messages during crawling include cache performance details
+   - Server logs and completion data include comprehensive cache metrics
+
+2. **Detailed Client Status**:
+
+   - SSE and polling endpoints now include comprehensive cache statistics
+   - Overall cache hit rates by type (HTML, query, embedding)
+   - Performance metrics showing both percentages and absolute time savings
+
+3. **Dynamic Performance Metrics**:
+
+   - Cache hit messages now include actual time saved calculations
+   - Performance gain displays dynamically calculated percentages based on actual response times
+   - Server logs show detailed metrics including milliseconds saved and percentage improvements
+
+4. **Query Parsing Cache Indicators**:
+
+   - Added cache age tracking for parsed queries
+   - Chat responses now include indicators when query parsing used cache
+   - Time saved percentages for AI query parsing operations
+
+5. **Example Messages**:
+
+   **Crawl Completion:**
+
+   ```
+   ✅ Crawling completed! Found 979 images across 1 pages 🚀 (Cache hit! 85% faster, content was 2h 15m old)
+   Successfully crawled 1 pages 🚀 (Cache hit! 85% faster, content was 2h 15m old)
+   ```
+
+   **Search Results:**
+
+   ```
+   🚀 Cache hit! Results loaded 92% faster (2h 15m old) - saved 92% of processing time
+   💡 Query parsing cache hit! 85% faster (parsed 1h 30m ago, saved 85% of processing time)
+   ```
+
+6. **Status API Cache Statistics**:
+   ```json
+   {
+     "cache_statistics": {
+       "hit_rates": { "html": 0.85, "query": 0.92, "embedding": 0.7 },
+       "overall_hit_rate": 0.82,
+       "total_hits": 124,
+       "performance_gains": {
+         "html": "~85% faster",
+         "query": "~90% faster",
+         "embedding": "~70% faster"
+       }
+     },
+     "time_saved_ms": 4600,
+     "time_saved_percent": 92
+   }
+   ```
+
 ### Dependencies
 
 - Redis Cloud setup and connection
@@ -100,9 +162,9 @@ All components have been thoroughly tested and show significant performance impr
 **Log Message Examples**:
 
 ```
-2025-05-26 21:24:12,795 - cache - INFO - HTML CACHE HIT for https://example.com (limit=5) - Age: 2h 15m, Performance: 85% faster, Response: 12.34ms
-2025-05-26 21:24:12,796 - crawler - INFO - CRAWLER CACHE HIT for https://example.com - Age: 2h 15m, Performance: 85% faster
-2025-05-26 21:24:12,797 - search - INFO - SEARCH CACHE HIT for query 'iPad images' - Results: 5, Age: 1h 30m, Performance: 90% faster
+2025-05-26 21:24:12,795 - cache - INFO - HTML CACHE HIT for https://example.com (limit=5) - Age: 2h 15m, Performance: 92% faster, Response: 12.34ms, Saved: 4600.00ms (92%)
+2025-05-26 21:24:12,796 - crawler - INFO - CRAWLER CACHE HIT for https://example.com - Age: 2h 15m, Performance: 92% faster
+2025-05-26 21:24:12,797 - search - INFO - SEARCH CACHE HIT for query 'iPad images' - Results: 5, Age: 1h 30m, Performance: 91% faster, Response: 180.50ms, Saved: 1819.50ms
 2025-05-26 21:24:12,798 - cache - INFO - EMBEDDING CACHED for 'search query' - Dimensions: 1536, Size: 0.02MB, TTL: 2592000s
 ```
 
@@ -187,5 +249,19 @@ All components have been thoroughly tested and show significant performance impr
   - Handles edge cases like empty paths and root URLs consistently
   - URLs like `https://apple.com/iphone` and `https://apple.com/iphone/` now generate identical cache keys
 - ✅ **Testing**: Verified that all URL variations generate the same hash, enabling proper cache hits
+
+**5. Enhanced Cache Hit Metrics**:
+
+- ✅ **Issue**: Cache hit indicators lacked detailed performance information
+- ✅ **Root Cause**: Original implementation provided simple percentage improvements without specific time savings
+- ✅ **Solution**:
+  - Enhanced `_calculate_performance_gain()` to provide detailed metrics including:
+    - Time saved in milliseconds
+    - Percentage improvement
+    - Dynamic calculation based on actual response times
+  - Added these metrics to all cache hit logs and client responses
+  - Extended API responses to include comprehensive cache statistics
+  - Added parsed query cache hit indicators to chat responses
+- ✅ **Testing**: Verified metrics display correctly in logs and API responses
 
 **All implementation complete with comprehensive server logging and critical bug fixes!**

@@ -422,24 +422,52 @@ class CacheService:
         except Exception:
             return "unknown"
     
-    def _calculate_performance_gain(self, cache_type: str) -> str:
+    def _calculate_performance_gain(self, cache_type: str, response_time_ms: float = None) -> Dict[str, Any]:
         """
         Calculate estimated performance gain from cache hit.
         
         Args:
             cache_type: Type of cache that was hit
+            response_time_ms: Optional response time to use for calculation
             
         Returns:
-            Performance gain string (e.g., "85% faster")
+            Dict with performance gain metrics
         """
-        # Typical performance gains based on cache type
-        gains = {
-            "html_cache": 85,  # Avoiding network calls to crawl pages
-            "query_cache": 90,  # Avoiding vector search operations
+        # Typical operation times without cache (ms)
+        typical_times = {
+            "html_cache": 5000,     # Typical crawl time ~5000ms
+            "query_cache": 2000,    # Typical query time ~2000ms 
+            "embedding_cache": 900, # Typical embedding generation ~900ms
+        }
+        
+        # Default percentage gains (approximate)
+        default_gains = {
+            "html_cache": 85,      # Avoiding network calls to crawl pages
+            "query_cache": 90,     # Avoiding vector search operations
             "embedding_cache": 70,  # Avoiding OpenAI API calls
         }
         
-        return f"{gains.get(cache_type, 50)}% faster"
+        typical_time = typical_times.get(cache_type, 1000)
+        default_gain = default_gains.get(cache_type, 50)
+        
+        if response_time_ms is not None:
+            # Calculate actual time saved based on response time
+            time_saved_ms = typical_time - response_time_ms
+            time_saved_percent = round((time_saved_ms / typical_time) * 100)
+            
+            # Use calculated value, but don't go above reasonable limits
+            gain_percent = min(time_saved_percent, 98)  # Cap at 98% to avoid unrealistic claims
+        else:
+            # Use default if no response time provided
+            gain_percent = default_gain
+            time_saved_ms = (typical_time * gain_percent) / 100
+        
+        return {
+            "percentage": gain_percent,
+            "display": f"{gain_percent}% faster",
+            "time_saved_ms": round(time_saved_ms, 2),
+            "time_saved_percent": gain_percent
+        }
     
     def is_available(self) -> bool:
         """
@@ -503,20 +531,24 @@ class CacheService:
                 self.metrics.track_hit(cache_type, elapsed_ms)
                 
                 cache_age = self._format_cache_age(content.get("crawl_timestamp", ""))
-                performance_gain = self._calculate_performance_gain(cache_type)
+                performance_metrics = self._calculate_performance_gain(cache_type, elapsed_ms)
+                performance_gain = performance_metrics["display"]
                 
                 cache_logger.info(
                     f"HTML CACHE HIT for {url} (limit={limit}) - Age: {cache_age}, "
-                    f"Performance: {performance_gain}, Response: {elapsed_ms:.2f}ms"
+                    f"Performance: {performance_gain}, Response: {elapsed_ms:.2f}ms, "
+                    f"Saved: {performance_metrics['time_saved_ms']:.2f}ms ({performance_metrics['time_saved_percent']}%)"
                 )
                 
-                # Add cache metadata
+                # Add cache metadata with detailed performance metrics
                 content["_cache"] = {
                     "hit": True,
                     "cache_type": cache_type,
                     "cache_age": cache_age,
                     "performance_gain": performance_gain,
-                    "response_time_ms": round(elapsed_ms, 2)
+                    "response_time_ms": round(elapsed_ms, 2),
+                    "time_saved_ms": performance_metrics["time_saved_ms"],
+                    "time_saved_percent": performance_metrics["time_saved_percent"]
                 }
                 
                 return content
@@ -635,22 +667,25 @@ class CacheService:
                 self.metrics.track_hit(cache_type, elapsed_ms)
                 
                 cache_age = self._format_cache_age(results.get("search_timestamp", ""))
-                performance_gain = self._calculate_performance_gain(cache_type)
+                performance_metrics = self._calculate_performance_gain(cache_type, elapsed_ms)
+                performance_gain = performance_metrics["display"]
                 result_count = len(results.get("results", []))
                 
                 cache_logger.info(
                     f"QUERY CACHE HIT for '{query[:50]}...' - Age: {cache_age}, "
                     f"Results: {result_count}, Performance: {performance_gain}, "
-                    f"Response: {elapsed_ms:.2f}ms"
+                    f"Response: {elapsed_ms:.2f}ms, Saved: {performance_metrics['time_saved_ms']:.2f}ms"
                 )
                 
-                # Add cache metadata
+                # Add cache metadata with detailed performance metrics
                 results["_cache"] = {
                     "hit": True,
                     "cache_type": cache_type,
                     "cache_age": cache_age,
                     "performance_gain": performance_gain,
-                    "response_time_ms": round(elapsed_ms, 2)
+                    "response_time_ms": round(elapsed_ms, 2),
+                    "time_saved_ms": performance_metrics["time_saved_ms"],
+                    "time_saved_percent": performance_metrics["time_saved_percent"]
                 }
                 
                 return results
@@ -779,12 +814,13 @@ class CacheService:
                 self.metrics.track_hit(cache_type, elapsed_ms)
                 
                 cache_age = self._format_cache_age(data.get("created_timestamp", ""))
-                performance_gain = self._calculate_performance_gain(cache_type)
+                performance_metrics = self._calculate_performance_gain(cache_type, elapsed_ms)
+                performance_gain = performance_metrics["display"]
                 
                 cache_logger.info(
                     f"EMBEDDING CACHE HIT for '{text[:30]}...' (model: {model}) - "
                     f"Age: {cache_age}, Performance: {performance_gain}, "
-                    f"Response: {elapsed_ms:.2f}ms"
+                    f"Response: {elapsed_ms:.2f}ms, Saved: {performance_metrics['time_saved_ms']:.2f}ms"
                 )
                 
                 return embedding

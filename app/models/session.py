@@ -30,7 +30,6 @@ class CrawlSession:
         image_stats (dict): Statistics about images found (formats, pages)
         skip_cache (bool): Whether to skip cache lookup for this session
         cache_hits (int): Number of cache hits during this session
-        cache_performance_gain (str): Estimated performance gain from cache usage
     """
     
     def __init__(self, session_id: str, url: str, limit: int, skip_cache: bool = False):
@@ -57,7 +56,6 @@ class CrawlSession:
         # Cache-related properties
         self.skip_cache = skip_cache
         self.cache_hits = 0
-        self.cache_performance_gain = ""
         
     def add_message(self, message_type: str, data: dict):
         """

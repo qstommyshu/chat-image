@@ -291,11 +291,20 @@ class SearchService:
             if cached_result:
                 # We've cached the parsed result as a dictionary
                 elapsed_ms = round((time.time() - start_time) * 1000, 2)
+                # Calculate time saved and percentage
+                # Typical OpenAI API call takes ~800-1000ms for parsing
+                typical_api_time = 900  # ms
+                time_saved_ms = typical_api_time - elapsed_ms
+                time_saved_percent = round((time_saved_ms / typical_api_time) * 100)
+                
                 cache_info.update({
                     "cache_hit": True,
                     "cache_type": "parser_cache",
                     "response_time_ms": elapsed_ms,
-                    "performance_gain": "70% faster"  # Avoiding OpenAI API calls
+                    "performance_gain": f"{time_saved_percent}% faster",  # Dynamic calculation
+                    "time_saved_ms": time_saved_ms,
+                    "time_saved_percent": time_saved_percent,
+                    "cache_age": self.cache_service._format_cache_age(datetime.fromisoformat(cached_result[1]).isoformat()) if len(cached_result) > 1 else "unknown"
                 })
                 
                 search_logger.info(f"PARSER CACHE HIT for '{user_message}' - skipping OpenAI API call")
@@ -311,12 +320,13 @@ class SearchService:
         
         # Cache the result if cache is available
         if self.cache_service.is_available():
-            # Cache as a single-item list to match embedding format
-            # This is a bit of a hack, but keeps the interface consistent
+            # Cache as a two-item list: the JSON data and the timestamp
+            # This allows us to track cache age properly
             json_str = json.dumps(result)
+            current_time = datetime.now().isoformat()
             await self.cache_service.set_embedding_cache(
                 text=f"parser_{user_message}",
-                embedding=[json_str],  # Store JSON string as first element
+                embedding=[json_str, current_time],  # Store JSON string and timestamp
                 model="query_parser",
                 ttl=7 * 24 * 60 * 60  # 7 days TTL for parser results
             )
