@@ -24,7 +24,9 @@ The Flask server has been refactored from a monolithic 1300+ line file into a cl
 │   │   ├── chat.py              # Chat/search endpoint (/chat)
 │   │   ├── status.py            # Status endpoints (SSE & polling)
 │   │   └── health.py            # Health check (/health)
-
+│   └── utils/
+│       ├── __init__.py
+│       └── html_utils.py        # HTML processing utilities
 ├── flask_server.py              # Original monolithic file (legacy)
 ├── flask_server_new.py          # New modular entry point
 ├── REPLIT_CONFIG.md            # Deployment configuration guide
@@ -39,6 +41,7 @@ The Flask server has been refactored from a monolithic 1300+ line file into a cl
 - **Models**: `app/models/` - Data structures and state management
 - **Services**: `app/services/` - Business logic layer
 - **API**: `app/api/` - Route handlers grouped by functionality
+- **Utils**: `app/utils/` - Reusable utility functions
 
 ### ✅ **Better Testability**
 
@@ -83,6 +86,10 @@ The Flask server has been refactored from a monolithic 1300+ line file into a cl
 - **status.py**: Real-time SSE and polling status endpoints
 - **chat.py**: Natural language image search
 - **health.py**: Health monitoring
+
+### Utils (`app/utils/`)
+
+- **html_utils.py**: URL/filename conversion, image format detection, context extraction
 
 ## Running the Modular Version
 
