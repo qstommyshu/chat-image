@@ -78,8 +78,7 @@ def start_crawl():
         "session_id": session_id,
         "message": "Crawling started",
         "subscribe_url": f"/crawl/{session_id}/status",
-        "status_url_sse": f"/crawl/{session_id}/status",
-        "status_url_polling": f"/crawl/{session_id}/status-simple",
+        "status_url": f"/crawl/{session_id}/status",
         "cache_enabled": not skip_cache and crawler_service.cache_service.is_available()
     }
     

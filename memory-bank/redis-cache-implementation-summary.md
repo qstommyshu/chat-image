@@ -91,9 +91,50 @@ We've successfully implemented a comprehensive Redis Cloud caching system for th
 
 The implemented caching system achieves:
 
-- ~85% faster response for repeated HTML page crawls
-- ~90% faster response for repeated search queries
-- ~70% reduction in OpenAI API calls for embeddings
+- Reduced response times for repeated HTML page crawls
+- Faster response for repeated search queries
+- Reduced OpenAI API calls for embeddings
+- Real cache age information and actual response times
+- Honest cache hit/miss reporting without fabricated performance claims
+
+## Cache System Cleanup (Latest Update)
+
+### Removed Hard-coded Performance Claims ✅
+
+**What was removed**:
+
+- `_calculate_performance_gain()` method with hard-coded typical times and default gains
+- Fabricated "~85% faster", "~90% faster", "~70% faster" messages
+- Fake time saved calculations and percentages
+- Performance gain fields in cache metadata
+
+**What remains**:
+
+- ✅ Real response times in milliseconds
+- ✅ Actual cache age (e.g., "2h 15m old")
+- ✅ Genuine cache hit/miss status
+- ✅ Clean cache statistics (hit rates, total hits/misses)
+
+**Updated cache messages**:
+
+- **Before**: `Cache hit! Results loaded 92% faster (2h 15m old) - saved 92% of processing time`
+- **After**: `Cache hit! Results loaded instantly (2h 15m old)`
+
+### API Endpoint Cleanup ✅
+
+**Removed unused endpoints**:
+
+- `/crawl/<session_id>/status-simple` polling endpoint (dead code)
+- `crawl_status_polling()` function (~78 lines removed)
+- Fallback logic pointing to unused polling endpoint
+- `status_url_polling` field from crawl API responses
+
+**Benefits**:
+
+- ✅ Cleaner, more maintainable codebase
+- ✅ Honest performance reporting
+- ✅ Reduced API surface area
+- ✅ No confusing dual-endpoint design
 
 ## Monitoring and Metrics
 

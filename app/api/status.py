@@ -2,7 +2,7 @@
 Status API Endpoints
 
 This module contains API endpoints for monitoring crawl session status
-including both SSE and polling implementations.
+using Server-Sent Events (SSE).
 """
 
 import json
@@ -29,17 +29,16 @@ def crawl_status_sse(session_id):
         session_id (str): The session ID to monitor
         
     Returns:
-        SSE stream with status updates or redirect to polling endpoint
+        SSE stream with status updates
         
     Error Codes:
         404: Session not found
-        503: SSE disabled, use polling endpoint
+        503: SSE disabled
     """
     if not Config.ENABLE_SSE:
         return jsonify({
             "error": "SSE disabled", 
-            "message": "Use polling endpoint instead",
-            "polling_url": f"/crawl/{session_id}/status-simple"
+            "message": "Server-Sent Events are disabled"
         }), 503
     
     session = session_manager.get_session(session_id)
