@@ -304,7 +304,7 @@ class CacheService:
     
     def _get_url_hash(self, url: str) -> str:
         """
-        Generate a hash for a URL, considering relevant parts.
+        Generate a hash for a URL, considering relevant parts with normalization.
         
         Args:
             url: URL to hash
@@ -315,9 +315,16 @@ class CacheService:
         # Parse URL to extract relevant parts
         parsed = urlparse(url)
         
-        # Use netloc (domain) and path for the hash
+        # Normalize the path to handle trailing slashes consistently
+        # Keep root path as '/', strip trailing slashes from other paths
+        # Also handle empty paths by treating them as root
+        path = parsed.path.rstrip('/') if parsed.path and parsed.path != '/' else '/'
+        if not path:  # Empty path becomes root
+            path = '/'
+        
+        # Use netloc (domain) and normalized path for the hash
         # Query parameters can be included based on requirements
-        relevant_parts = f"{parsed.netloc}{parsed.path}"
+        relevant_parts = f"{parsed.netloc}{path}"
         
         return self._generate_hash(relevant_parts)
     

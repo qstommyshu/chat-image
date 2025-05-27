@@ -178,4 +178,14 @@ All components have been thoroughly tested and show significant performance impr
   - Enhanced logging to include limit information in cache hit/miss messages
 - ✅ **Testing**: Verified that different page limits create separate cache entries and prevent incorrect cache hits
 
+**4. URL Normalization Issue Preventing Cache Hits**:
+
+- ✅ **Issue**: Same URLs with/without trailing slashes creating different cache keys, preventing cache hits
+- ✅ **Root Cause**: URL hash generation didn't normalize paths, so `https://example.com/page` and `https://example.com/page/` created different hashes
+- ✅ **Solution**:
+  - Updated `_get_url_hash()` method to normalize URL paths by removing trailing slashes (except for root path)
+  - Handles edge cases like empty paths and root URLs consistently
+  - URLs like `https://apple.com/iphone` and `https://apple.com/iphone/` now generate identical cache keys
+- ✅ **Testing**: Verified that all URL variations generate the same hash, enabling proper cache hits
+
 **All implementation complete with comprehensive server logging and critical bug fixes!**
