@@ -81,12 +81,7 @@ def crawl_status_sse(session_id):
                                 'embedding': cache_stats.get('embedding_cache', {}).get('hit_rate', 0)
                             },
                             'overall_hit_rate': cache_stats.get('overall', {}).get('overall_hit_rate', 0),
-                            'total_hits': sum(c.get('total_hits', 0) for c in cache_stats.values() if isinstance(c, dict)),
-                            'performance_gains': {
-                                'html': '~85% faster',
-                                'query': '~90% faster',
-                                'embedding': '~70% faster'
-                            }
+                            'total_hits': sum(c.get('total_hits', 0) for c in cache_stats.values() if isinstance(c, dict))
                         }
                 except Exception:
                     pass
@@ -238,12 +233,7 @@ def crawl_status_polling(session_id):
                         'embedding': cache_stats.get('embedding_cache', {}).get('hit_rate', 0)
                     },
                     'overall_hit_rate': cache_stats.get('overall', {}).get('overall_hit_rate', 0),
-                    'total_hits': sum(c.get('total_hits', 0) for c in cache_stats.values() if isinstance(c, dict)),
-                    'performance_gains': {
-                        'html': '~85% faster',
-                        'query': '~90% faster',
-                        'embedding': '~70% faster'
-                    }
+                    'total_hits': sum(c.get('total_hits', 0) for c in cache_stats.values() if isinstance(c, dict))
                 }
         except Exception:
             pass

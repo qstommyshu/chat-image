@@ -67,8 +67,7 @@ class SearchService:
             "cache_hit": False,
             "cache_type": None,
             "cache_age": None,
-            "response_time_ms": 0,
-            "performance_gain": None
+            "response_time_ms": 0
         }
         
         # Check if cache is available and not explicitly skipped
@@ -93,11 +92,10 @@ class SearchService:
                 # Log search cache hit for server logs
                 search_logger.info(
                     f"SEARCH CACHE HIT for query '{query}' in namespace '{namespace}' - "
-                    f"Results: {len(results)}, Age: {cache_info.get('cache_age', 'unknown')}, "
-                    f"Performance: {cache_info.get('performance_gain', 'unknown')}"
+                    f"Results: {len(results)}, Age: {cache_info.get('cache_age', 'unknown')}"
                 )
                 
-                print(f"Cache hit for query '{query}' in namespace '{namespace}' - {cache_info.get('performance_gain', '')}")
+                print(f"Cache hit for query '{query}' in namespace '{namespace}'")
                 
                 return results[:max_results], cache_info
         
@@ -291,19 +289,11 @@ class SearchService:
             if cached_result:
                 # We've cached the parsed result as a dictionary
                 elapsed_ms = round((time.time() - start_time) * 1000, 2)
-                # Calculate time saved and percentage
-                # Typical OpenAI API call takes ~800-1000ms for parsing
-                typical_api_time = 900  # ms
-                time_saved_ms = typical_api_time - elapsed_ms
-                time_saved_percent = round((time_saved_ms / typical_api_time) * 100)
                 
                 cache_info.update({
                     "cache_hit": True,
                     "cache_type": "parser_cache",
                     "response_time_ms": elapsed_ms,
-                    "performance_gain": f"{time_saved_percent}% faster",  # Dynamic calculation
-                    "time_saved_ms": time_saved_ms,
-                    "time_saved_percent": time_saved_percent,
                     "cache_age": self.cache_service._format_cache_age(datetime.fromisoformat(cached_result[1]).isoformat()) if len(cached_result) > 1 else "unknown"
                 })
                 

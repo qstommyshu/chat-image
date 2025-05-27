@@ -243,17 +243,7 @@ class TestCacheService:
         age = cache_service._format_cache_age(very_old)
         assert "3d 5h" in age
     
-    def test_calculate_performance_gain(self, cache_service):
-        """Test performance gain calculation."""
-        # Test HTML cache performance gain
-        html_gain = cache_service._calculate_performance_gain("html_cache", 250.0)
-        assert html_gain["percentage"] > 0
-        assert "% faster" in html_gain["display"]
-        assert html_gain["time_saved_ms"] > 0
-        
-        # Test with None response time (should use defaults)
-        default_gain = cache_service._calculate_performance_gain("query_cache")
-        assert default_gain["percentage"] == 90  # Default for query cache
+
     
     @pytest.mark.asyncio
     async def test_get_html_cache_hit(self, cache_service):
@@ -273,6 +263,8 @@ class TestCacheService:
         assert result["url"] == "https://example.com"
         assert "_cache" in result
         assert result["_cache"]["hit"] is True
+        assert result["_cache"]["cache_type"] == "html_cache"
+        assert "cache_age" in result["_cache"]
         
         # Verify Redis was called with correct key pattern
         cache_service.redis_client.get.assert_called()
@@ -327,6 +319,8 @@ class TestCacheService:
         assert len(result["results"]) == 2
         assert "_cache" in result
         assert result["_cache"]["hit"] is True
+        assert result["_cache"]["cache_type"] == "query_cache"
+        assert "cache_age" in result["_cache"]
     
     @pytest.mark.asyncio
     async def test_set_query_cache(self, cache_service):
@@ -492,6 +486,7 @@ class TestCacheIntegration:
             assert cached_result is not None
             assert cached_result["url"] == "https://example.com"
             assert "_cache" in cached_result
+            assert cached_result["_cache"]["hit"] is True
     
     @pytest.mark.asyncio 
     async def test_metrics_tracking_integration(self):

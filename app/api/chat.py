@@ -101,11 +101,7 @@ async def chat():
         # Add cache hit indication to response if applicable
         if cache_info and cache_info.get("cache_hit"):
             cache_age = cache_info.get("cache_age", "")
-            performance_gain = cache_info.get("performance_gain", "")
-            time_saved_percent = cache_info.get("time_saved_percent", "")
-            response += f"\n\n🚀 Cache hit! Results loaded {performance_gain} ({cache_age} old)"
-            if time_saved_percent:
-                response += f" - saved {time_saved_percent}% of processing time"
+            response += f"\n\n🚀 Cache hit! Results loaded instantly ({cache_age} old)"
                 
         # Add parser cache hit indication
         if parser_cache_info and parser_cache_info.get("cache_hit"):
